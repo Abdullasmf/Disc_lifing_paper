@@ -57,15 +57,15 @@ def generate_mesh(
     boundary_nodes = mesh.boundary_nodes()
 
     tree = cKDTree(contour_points)
-    d2c, i2c = tree.query(points, k=1)
+    distance_to_contour, nearest_contour_index = tree.query(points, k=1)
 
     return MeshData(
         mesh=mesh,
         nodes=points,
         triangles=triangles,
         boundary_node_ids=np.asarray(boundary_nodes, dtype=np.int32),
-        nearest_contour_index=i2c.astype(np.int32),
-        distance_to_contour=d2c.astype(float),
+        nearest_contour_index=nearest_contour_index.astype(np.int32),
+        distance_to_contour=distance_to_contour.astype(float),
     )
 
 
@@ -75,4 +75,3 @@ def assign_regions_from_contour(
 ) -> np.ndarray:
     """Assign node region from nearest contour sample point."""
     return contour_region_ids[nearest_contour_index].astype(np.int32)
-

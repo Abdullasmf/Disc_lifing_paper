@@ -17,8 +17,8 @@ def contour_derivative_features(contour_points: np.ndarray) -> Dict[str, np.ndar
 
     d2 = p_next - 2.0 * contour_points + p_prev
     curvature = np.abs(d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]) / np.maximum(speed**3, 1e-12)
-    second_like = np.linalg.norm(d2, axis=1)
-    return {"tangent": tangent, "curvature": curvature, "second_like": second_like}
+    second_derivative_magnitude = np.linalg.norm(d2, axis=1)
+    return {"tangent": tangent, "curvature": curvature, "second_derivative_magnitude": second_derivative_magnitude}
 
 
 def extract_config_nodes(
@@ -67,7 +67,7 @@ def extract_config_nodes(
                 dfeat["tangent"][cidx, 0],
                 dfeat["tangent"][cidx, 1],
                 dfeat["curvature"][cidx],
-                dfeat["second_like"][cidx],
+                dfeat["second_derivative_magnitude"][cidx],
             ]
         ).astype(np.float64)
         payload["node_feature_names"] = np.array(
@@ -78,4 +78,3 @@ def extract_config_nodes(
         payload["node_feature_names"] = np.array([], dtype="S64")
 
     return payload
-

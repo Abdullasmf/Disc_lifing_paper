@@ -53,8 +53,8 @@ def compute_stress_max(phase_stress: np.ndarray) -> np.ndarray:
 def compute_life_raw(phase_stress: np.ndarray, region_ids: np.ndarray) -> np.ndarray:
     """Miner accumulation over one fixed cycle with region-specific nonlinear S-N."""
     sigma = np.maximum(phase_stress, 1e-6)
-    c = REGION_BASQUIN_C[region_ids][:, None]
-    m = REGION_BASQUIN_M[region_ids][:, None]
-    n_fail = c * np.power(sigma, -m)
+    basquin_c = REGION_BASQUIN_C[region_ids][:, None]
+    basquin_m = REGION_BASQUIN_M[region_ids][:, None]
+    n_fail = basquin_c * np.power(sigma, -basquin_m)
     damage_per_cycle = np.sum(CYCLE_PHASE_WEIGHTS[None, :] / (n_fail + 1e-20), axis=1)
     return (1.0 / np.maximum(damage_per_cycle, 1e-20)).astype(np.float64)
