@@ -1,0 +1,74 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Local development settings
+.env
+.venv
+
+# VS Code specific files
+.vscode/
+
+# ANSYS
+*.rst
+*.log
+*.prt
+*.wbnj
+*.project_cache
+*.lock
+*.dat
+*.wbdp
+*.wbjn
+*.wbpj
+*.xml
+*.err
+*.PCS
+*.out
+*.mntr
+*.engd
+*.scdoc
+*.mechdb
+*.engd
+*.aapresults
+*.cnd
+*.DSP
+*.gst
+*.rcn
+*.bat
+*.ldhi
+*.rdb
+*.txt
+*.sh
+*.xlsx
+*.csv
+
+# Misc
+MPOS_Data_Download.xlsx
+Partnumbers_SAP_DATA_with_longtext.xlsx
+
+
+DesignPointLog.csv
+memory_reduction/
+Expressions.xls
+*.json
+*.cdb
+
+
+Machine_Learning/Pearl15_HPT_Life/Training/Trained_models/Trained_models.xlsx
+*.pt
+*.pth
+ANSYS/Modify_rst/Test.ipynb
