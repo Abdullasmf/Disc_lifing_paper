@@ -34,7 +34,7 @@ def compute_phase_equivalent_stresses(
 
     b = asm(rhs, basis)
     bnodes = mesh.boundary_nodes()
-    potential = solve(*condense(A, b, D=bnodes, x=0.0))
+    potential = solve(*condense(A, b, D=bnodes))
     potential = np.abs(potential)
     potential /= potential.max() + 1e-12
 
@@ -58,4 +58,3 @@ def compute_life_raw(phase_stress: np.ndarray, region_ids: np.ndarray) -> np.nda
     n_fail = c * np.power(sigma, -m)
     damage_per_cycle = np.sum(CYCLE_PHASE_WEIGHTS[None, :] / (n_fail + 1e-20), axis=1)
     return (1.0 / np.maximum(damage_per_cycle, 1e-20)).astype(np.float64)
-
