@@ -1,4 +1,4 @@
-"""Meshing and region transfer helpers."""
+"""Meshing and robust contour-provenance transfer helpers."""
 
 from __future__ import annotations
 
@@ -41,8 +41,7 @@ def generate_mesh(
     gr = np.linspace(r_min, r_max, grid_r)
     xx, rr = np.meshgrid(gx, gr, indexing="xy")
     interior = np.column_stack([xx.ravel(), rr.ravel()])
-    inside = poly.contains_points(interior)
-    interior = interior[inside]
+    interior = interior[poly.contains_points(interior)]
 
     points = np.vstack([contour_points, interior])
     points = _unique_rows(points)
@@ -50,11 +49,10 @@ def generate_mesh(
     tri = Delaunay(points)
     triangles = tri.simplices
     centroids = points[triangles].mean(axis=1)
-    keep = poly.contains_points(centroids)
-    triangles = triangles[keep]
+    triangles = triangles[poly.contains_points(centroids)]
 
     mesh = MeshTri(points.T, triangles.T)
-    boundary_nodes = mesh.boundary_nodes()
+    boundary_nodes = np.asarray(mesh.boundary_nodes(), dtype=np.int32)
 
     tree = cKDTree(contour_points)
     distance_to_contour, nearest_contour_index = tree.query(points, k=1)
@@ -63,15 +61,48 @@ def generate_mesh(
         mesh=mesh,
         nodes=points,
         triangles=triangles,
-        boundary_node_ids=np.asarray(boundary_nodes, dtype=np.int32),
+        boundary_node_ids=boundary_nodes,
         nearest_contour_index=nearest_contour_index.astype(np.int32),
-        distance_to_contour=distance_to_contour.astype(float),
+        distance_to_contour=distance_to_contour.astype(np.float64),
     )
 
 
-def assign_regions_from_contour(
-    nearest_contour_index: np.ndarray,
+def _weighted_majority(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    out = np.empty(values.shape[0], dtype=np.int32)
+    for i in range(values.shape[0]):
+        uniq, inv = np.unique(values[i], return_inverse=True)
+        score = np.zeros(uniq.shape[0], dtype=np.float64)
+        np.add.at(score, inv, weights[i])
+        out[i] = int(uniq[np.argmax(score)])
+    return out
+
+
+def assign_region_and_segment_from_contour(
+    nodes: np.ndarray,
+    contour_points: np.ndarray,
     contour_region_ids: np.ndarray,
-) -> np.ndarray:
-    """Assign node region from nearest contour sample point."""
-    return contour_region_ids[nearest_contour_index].astype(np.int32)
+    contour_segment_ids: np.ndarray,
+    k_neighbors: int = 5,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Assign robust region/segment IDs using segment-aware contour provenance.
+
+    Uses inverse-distance weighted voting over nearest contour samples.
+    """
+    tree = cKDTree(contour_points)
+    k = min(int(k_neighbors), contour_points.shape[0])
+    distances, indices = tree.query(nodes, k=k)
+
+    if k == 1:
+        distances = distances[:, None]
+        indices = indices[:, None]
+
+    weights = 1.0 / (distances + 1e-6)
+    region_votes = contour_region_ids[indices]
+    segment_votes = contour_segment_ids[indices]
+
+    region_ids = _weighted_majority(region_votes, weights)
+    segment_ids = _weighted_majority(segment_votes, weights)
+
+    nearest_contour_index = indices[:, 0].astype(np.int32)
+    nearest_distance_mm = distances[:, 0].astype(np.float64)
+    return region_ids, segment_ids, nearest_contour_index, nearest_distance_mm

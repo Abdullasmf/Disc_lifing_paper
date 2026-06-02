@@ -11,7 +11,7 @@ from .config import GeneratorConfig, sample_geometry_parameters
 from .features import extract_config_nodes
 from .geometry import build_disc_contour
 from .io_hdf5 import CONFIG_NAMES, close_output_files, create_output_files, write_sample
-from .mesh_ops import assign_regions_from_contour, generate_mesh
+from .mesh_ops import assign_region_and_segment_from_contour, generate_mesh
 from .physics import compute_life_raw, compute_phase_equivalent_stresses, compute_stress_max
 from .plotting import save_validation_plot
 
@@ -25,7 +25,10 @@ def run_generation(cfg: GeneratorConfig):
     )
     try:
         for sample_id in range(cfg.num_samples):
-            params = sample_geometry_parameters(rng)
+            sample_seed = int(rng.integers(0, 2**31 - 1))
+            sample_rng = np.random.default_rng(sample_seed)
+
+            params = sample_geometry_parameters(sample_rng)
             contour = build_disc_contour(params, points_per_segment=cfg.contour_points_per_segment)
             mesh_data = generate_mesh(
                 contour_points=contour.points,
@@ -33,28 +36,48 @@ def run_generation(cfg: GeneratorConfig):
                 grid_r=cfg.mesh_grid_points_r,
             )
 
-            region_id = assign_regions_from_contour(mesh_data.nearest_contour_index, contour.region_ids)
-            phase_stress = compute_phase_equivalent_stresses(
-                mesh=mesh_data.mesh,
+            mesh_region_id, mesh_segment_id, _, mesh_distance_to_contour = assign_region_and_segment_from_contour(
                 nodes=mesh_data.nodes,
-                region_ids=region_id,
-                geometry_params=params,
+                contour_points=contour.points,
+                contour_region_ids=contour.region_ids,
+                contour_segment_ids=contour.segment_ids,
             )
-            stress_max_vm = compute_stress_max(phase_stress)
-            life_raw = compute_life_raw(phase_stress, region_id)
+
+            mesh_phase_stress = compute_phase_equivalent_stresses(
+                nodes=mesh_data.nodes,
+                region_ids=mesh_region_id,
+                geometry_params=params,
+                landmarks_mm=contour.landmarks_mm,
+            )
+            mesh_stress_max_vm = compute_stress_max(mesh_phase_stress)
+            mesh_life_raw = compute_life_raw(mesh_phase_stress, mesh_region_id)
+
+            contour_phase_stress = compute_phase_equivalent_stresses(
+                nodes=contour.points,
+                region_ids=contour.region_ids,
+                geometry_params=params,
+                landmarks_mm=contour.landmarks_mm,
+            )
+            contour_stress_max_vm = compute_stress_max(contour_phase_stress)
+            contour_life_raw = compute_life_raw(contour_phase_stress, contour.region_ids)
 
             for cfg_name in CONFIG_NAMES:
                 payload = extract_config_nodes(
                     config_name=cfg_name,
-                    nodes=mesh_data.nodes,
-                    boundary_node_ids=mesh_data.boundary_node_ids,
-                    distance_to_contour=mesh_data.distance_to_contour,
-                    nearest_contour_index=mesh_data.nearest_contour_index,
+                    mesh_nodes=mesh_data.nodes,
+                    mesh_region_ids=mesh_region_id,
+                    mesh_segment_ids=mesh_segment_id,
+                    mesh_distance_to_contour=mesh_distance_to_contour,
+                    mesh_stress_max_vm=mesh_stress_max_vm,
+                    mesh_life_raw=mesh_life_raw,
+                    mesh_phase_stress=mesh_phase_stress,
                     contour_points=contour.points,
                     contour_region_ids=contour.region_ids,
-                    stress_max_vm=stress_max_vm,
-                    life_raw=life_raw,
-                    phase_stress=phase_stress,
+                    contour_segment_ids=contour.segment_ids,
+                    contour_arc_length_mm=contour.arc_length_mm,
+                    contour_stress_max_vm=contour_stress_max_vm,
+                    contour_life_raw=contour_life_raw,
+                    contour_phase_stress=contour_phase_stress,
                     edge_proximity_distance_mm=cfg.edge_proximity_distance_mm,
                 )
                 write_sample(
@@ -62,7 +85,9 @@ def run_generation(cfg: GeneratorConfig):
                     sample_id=sample_id,
                     payload=payload,
                     geometry_params=params,
-                    seed=cfg.seed,
+                    segment_names=contour.segment_names,
+                    segment_regions=contour.segment_regions,
+                    sample_seed=sample_seed,
                 )
 
             if cfg.save_validation_plots and sample_id < cfg.validation_plot_count:
@@ -71,9 +96,10 @@ def run_generation(cfg: GeneratorConfig):
                     sample_id=sample_id,
                     contour_points=contour.points,
                     nodes=mesh_data.nodes,
-                    region_id=region_id,
-                    stress_max_vm=stress_max_vm,
-                    life_raw=life_raw,
+                    region_id=mesh_region_id,
+                    stress_max_vm=mesh_stress_max_vm,
+                    life_raw=mesh_life_raw,
+                    phase_stress=mesh_phase_stress,
                 )
     finally:
         close_output_files(out_files)
@@ -109,4 +135,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
