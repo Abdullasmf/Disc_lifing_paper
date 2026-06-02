@@ -3,17 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from .config import GeneratorConfig, sample_geometry_parameters
-from .features import extract_config_nodes
-from .geometry import build_disc_contour
-from .io_hdf5 import CONFIG_NAMES, close_output_files, create_output_files, write_sample
-from .mesh_ops import assign_region_and_segment_from_contour, generate_mesh
-from .physics import compute_life_raw, compute_phase_equivalent_stresses, compute_stress_max
-from .plotting import save_validation_plot
+try:
+    from .config import GeneratorConfig, sample_geometry_parameters
+    from .features import extract_config_nodes
+    from .geometry import build_disc_contour
+    from .io_hdf5 import CONFIG_NAMES, close_output_files, create_output_files, write_sample
+    from .mesh_ops import assign_region_and_segment_from_contour, generate_mesh
+    from .physics import compute_life_raw, compute_phase_equivalent_stresses, compute_stress_max
+    from .plotting import save_validation_plot
+except ImportError:
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from Data_gen.config import GeneratorConfig, sample_geometry_parameters
+    from Data_gen.features import extract_config_nodes
+    from Data_gen.geometry import build_disc_contour
+    from Data_gen.io_hdf5 import CONFIG_NAMES, close_output_files, create_output_files, write_sample
+    from Data_gen.mesh_ops import assign_region_and_segment_from_contour, generate_mesh
+    from Data_gen.physics import compute_life_raw, compute_phase_equivalent_stresses, compute_stress_max
+    from Data_gen.plotting import save_validation_plot
 
 
 def run_generation(cfg: GeneratorConfig):
@@ -36,18 +49,20 @@ def run_generation(cfg: GeneratorConfig):
                 grid_r=cfg.mesh_grid_points_r,
             )
 
-            mesh_region_id, mesh_segment_id, _, mesh_distance_to_contour = assign_region_and_segment_from_contour(
-                nodes=mesh_data.nodes,
-                contour_points=contour.points,
-                contour_region_ids=contour.region_ids,
-                contour_segment_ids=contour.segment_ids,
-            )
+            mesh_region_id, mesh_segment_id, mesh_nearest_contour_index, mesh_distance_to_contour = \
+                assign_region_and_segment_from_contour(
+                    nodes=mesh_data.nodes,
+                    contour_points=contour.points,
+                    contour_region_ids=contour.region_ids,
+                    contour_segment_ids=contour.segment_ids,
+                )
 
             mesh_phase_stress = compute_phase_equivalent_stresses(
                 nodes=mesh_data.nodes,
                 region_ids=mesh_region_id,
                 geometry_params=params,
                 landmarks_mm=contour.landmarks_mm,
+                contour_points=contour.points,
             )
             mesh_stress_max_vm = compute_stress_max(mesh_phase_stress)
             mesh_life_raw = compute_life_raw(mesh_phase_stress, mesh_region_id)
@@ -57,6 +72,7 @@ def run_generation(cfg: GeneratorConfig):
                 region_ids=contour.region_ids,
                 geometry_params=params,
                 landmarks_mm=contour.landmarks_mm,
+                contour_points=contour.points,
             )
             contour_stress_max_vm = compute_stress_max(contour_phase_stress)
             contour_life_raw = compute_life_raw(contour_phase_stress, contour.region_ids)
@@ -79,6 +95,7 @@ def run_generation(cfg: GeneratorConfig):
                     contour_life_raw=contour_life_raw,
                     contour_phase_stress=contour_phase_stress,
                     edge_proximity_distance_mm=cfg.edge_proximity_distance_mm,
+                    mesh_nearest_contour_index=mesh_nearest_contour_index,
                 )
                 write_sample(
                     h5f=out_files[cfg_name],
