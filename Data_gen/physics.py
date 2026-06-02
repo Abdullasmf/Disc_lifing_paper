@@ -18,10 +18,19 @@ from .config import CYCLE_PHASE_WEIGHTS, CYCLE_SPEED_FACTORS
 
 # Mild region scaling: keeps region discontinuity but avoids dominating all other effects.
 REGION_STRESS_SCALE = np.array([1.08, 1.00, 1.14], dtype=np.float64)
+# Bore and rim are slightly amplified vs web; kept close to 1.0 so geometry and phase effects dominate.
 
 # Basquin coefficients intentionally discontinuous across bore/web/rim.
 REGION_BASQUIN_C = np.array([2.2e12, 7.5e11, 4.2e12], dtype=np.float64)
 REGION_BASQUIN_M = np.array([4.2, 5.0, 5.6], dtype=np.float64)
+# Synthetic calibration targets plausible relative discontinuity (not material-card fidelity).
+
+MIN_THICKNESS_MM = 1e-3
+SIGMA_REF_MPA = 180.0
+AMPLITUDE_HALF_RANGE = 0.5
+AMPLITUDE_SPEED_BASE = 0.85
+AMPLITUDE_SPEED_GAIN = 0.15
+EPSILON_GUARD = 1e-6
 
 
 def _local_section_thickness(nodes: np.ndarray, params: Dict[str, float]) -> np.ndarray:
@@ -40,15 +49,16 @@ def _local_section_thickness(nodes: np.ndarray, params: Dict[str, float]) -> np.
 
     in_web = (x > x1) & (x < x2)
     if np.any(in_web):
-        xi = (x[in_web] - x1) / max(x2 - x1, 1e-6)
+        xi = (x[in_web] - x1) / max(x2 - x1, EPSILON_GUARD)
         thickness[in_web] = (1.0 - xi) * t_web + xi * (0.85 * t_web + 0.15 * t_rim)
 
     in_rim_transition = (x >= x2) & (x < x3)
     if np.any(in_rim_transition):
-        xi = (x[in_rim_transition] - x2) / max(x3 - x2, 1e-6)
+        xi = (x[in_rim_transition] - x2) / max(x3 - x2, EPSILON_GUARD)
         thickness[in_rim_transition] = (1.0 - xi) * (0.85 * t_web + 0.15 * t_rim) + xi * t_rim
 
-    return np.maximum(thickness, 1e-3)
+    # Minimum section floor avoids singular amplification in very thin synthetic geometries.
+    return np.maximum(thickness, MIN_THICKNESS_MM)
 
 
 def _concentration_factor(nodes: np.ndarray, params: Dict[str, float], landmarks_mm: Dict[str, np.ndarray]) -> np.ndarray:
@@ -61,6 +71,7 @@ def _concentration_factor(nodes: np.ndarray, params: Dict[str, float], landmarks
     lb = max(1.5 * params["bore_web_fillet_radius"], 0.8)
     lr = max(1.5 * params["web_rim_fillet_radius"], 0.8)
 
+    # Bore-web transition is biased slightly stronger than web-rim in this synthetic v2 model.
     k_bore = 1.0 + 0.24 * np.exp(-(d_bore / lb) ** 2)
     k_rim = 1.0 + 0.18 * np.exp(-(d_rim / lr) ** 2)
     return k_bore * k_rim
@@ -76,7 +87,7 @@ def compute_phase_equivalent_stresses(
     r = nodes[:, 1]
     r_inner = float(landmarks_mm["r_inner"][0])
     r_outer = float(landmarks_mm["r_outer"][0])
-    span = max(r_outer - r_inner, 1e-6)
+    span = max(r_outer - r_inner, EPSILON_GUARD)
     r_norm = np.clip((r - r_inner) / span, 0.0, 1.0)
 
     radial_term = 0.30 + 0.70 * np.power(r_norm, 1.35)
@@ -92,9 +103,8 @@ def compute_phase_equivalent_stresses(
         geometry_params["rim_thickness"] + geometry_params["web_length"] + geometry_params["bore_radius"]
     )
 
-    sigma_ref = 180.0
     base = (
-        sigma_ref
+        SIGMA_REF_MPA
         * combined_rotor_shape
         * thin_section_amp
         * geom_conc
@@ -114,17 +124,18 @@ def compute_stress_max(phase_stress: np.ndarray) -> np.ndarray:
 def compute_life_raw(phase_stress: np.ndarray, region_ids: np.ndarray) -> np.ndarray:
     """Compute raw life via phase-wise stress amplitudes and Miner accumulation.
 
-    amplitude surrogate: sigma_a = 0.5 * sigma_eq * (0.85 + 0.15 * speed_factor)
+    amplitude surrogate:
+      sigma_a = AMPLITUDE_HALF_RANGE * sigma_eq * (AMPLITUDE_SPEED_BASE + AMPLITUDE_SPEED_GAIN * speed_factor)
     region S-N law: N = C_region * sigma_a^(-m_region)
     cycle damage: D = sum_i(w_i / N_i), life_raw = 1 / D
     """
-    sigma_eq = np.maximum(phase_stress, 1e-6)
-    amplitude_scale = 0.5 * (0.85 + 0.15 * CYCLE_SPEED_FACTORS)
-    sigma_a = sigma_eq * amplitude_scale[None, :]
+    sigma_eq = np.maximum(phase_stress, EPSILON_GUARD)
+    amplitude_scale = AMPLITUDE_HALF_RANGE * (AMPLITUDE_SPEED_BASE + AMPLITUDE_SPEED_GAIN * CYCLE_SPEED_FACTORS)
+    sigma_a = sigma_eq * amplitude_scale[None, :]  # shape: (nodes, phases)
 
     basquin_c = REGION_BASQUIN_C[region_ids][:, None]
     basquin_m = REGION_BASQUIN_M[region_ids][:, None]
-    n_fail = basquin_c * np.power(np.maximum(sigma_a, 1e-6), -basquin_m)
+    n_fail = basquin_c * np.power(np.maximum(sigma_a, EPSILON_GUARD), -basquin_m)
 
     damage_per_cycle = np.sum(CYCLE_PHASE_WEIGHTS[None, :] / np.maximum(n_fail, 1e-20), axis=1)
     return (1.0 / np.maximum(damage_per_cycle, 1e-20)).astype(np.float64)

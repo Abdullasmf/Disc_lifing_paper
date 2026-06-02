@@ -42,7 +42,7 @@ def save_validation_plot(
     fig.colorbar(s2, ax=axes[2], fraction=0.046)
 
     s3 = axes[3].scatter(nodes[:, 0], nodes[:, 1], c=phase_stress[:, 1], s=3, cmap="magma")
-    axes[3].set_title("phase stress: takeoff")
+    axes[3].set_title("Phase stress: takeoff")
     axes[3].set_aspect("equal", adjustable="box")
     fig.colorbar(s3, ax=axes[3], fraction=0.046)
 

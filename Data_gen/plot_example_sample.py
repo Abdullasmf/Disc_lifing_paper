@@ -26,6 +26,7 @@ from .physics import compute_life_raw, compute_phase_equivalent_stresses, comput
 
 
 def create_example_plot(output_png: Path, seed: int = 7):
+    """Generate one deterministic synthetic sample and save a multi-panel PNG."""
     rng = np.random.default_rng(seed)
     params = sample_geometry_parameters(rng)
 
@@ -83,7 +84,7 @@ def create_example_plot(output_png: Path, seed: int = 7):
 
     phase_idx = list(CYCLE_PHASES).index("takeoff")
     sc4 = ax[4].scatter(mesh_data.nodes[:, 0], mesh_data.nodes[:, 1], c=phase_stress[:, phase_idx], s=4, cmap="magma")
-    ax[4].set_title("phase stress: takeoff")
+    ax[4].set_title("Phase stress: takeoff")
     ax[4].set_aspect("equal", adjustable="box")
     fig.colorbar(sc4, ax=ax[4], fraction=0.046)
 
