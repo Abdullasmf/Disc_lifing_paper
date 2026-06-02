@@ -52,9 +52,16 @@ def resample_contour_uniform_arc_length(
     new_points = np.column_stack([x_new, r_new])
 
     # Nearest-original-sample assignment in 1-D arc-length space with cyclic wrap.
-    diff = np.abs(arc_length_mm[None, :] - s_new[:, None])          # (n, n)
-    diff_wrapped = np.minimum(diff, total_arc - diff)
-    nearest = np.argmin(diff_wrapped, axis=1)
+    # O(n log n): use searchsorted on the sorted arc_length_mm, then compare the
+    # two candidate neighbours (one on each side) using the cyclic distance.
+    idx_r = np.searchsorted(arc_length_mm, s_new, side="right") % n
+    idx_l = (idx_r - 1) % n
+
+    def _cyc_dist(q: np.ndarray, ref_idx: np.ndarray) -> np.ndarray:
+        d = np.abs(q - arc_length_mm[ref_idx])
+        return np.minimum(d, total_arc - d)
+
+    nearest = np.where(_cyc_dist(s_new, idx_l) <= _cyc_dist(s_new, idx_r), idx_l, idx_r)
 
     new_region_ids = region_ids[nearest].astype(np.int32)
     new_segment_ids = segment_ids[nearest].astype(np.int32)
@@ -77,7 +84,7 @@ def contour_derivative_features(contour_points: np.ndarray, arc_length_mm: np.nd
     s_next_vals = np.roll(s, -1)
     # Boundary corrections: point-0's previous is the last point (at -closing_gap
     # from point-0) and the last point's next is point-0 (at +closing_gap).
-    s_prev_vals[0] = s[-1] - total_arc      # equivalent negative offset
+    s_prev_vals[0] = -closing_gap      # arc position of last point relative to point 0
     s_next_vals[-1] = total_arc             # wrap-around position of point-0
 
     ds_prev = np.maximum(s - s_prev_vals, 1e-9)

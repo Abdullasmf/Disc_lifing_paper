@@ -36,8 +36,10 @@ EPSILON_GUARD = 1e-6
 def _local_section_thickness(nodes: np.ndarray, params: Dict[str, float]) -> np.ndarray:
     """Deprecated: template-based axial-region thickness estimate.
 
-    Retained for backward compatibility only.  Prefer _geometry_section_thickness
-    which derives thickness directly from the actual contour geometry.
+    .. deprecated::
+        Pass *contour_points* to :func:`compute_phase_equivalent_stresses` to
+        use the geometry-derived :func:`_geometry_section_thickness` instead.
+        This fallback may be removed in a future cleanup.
     """
     x = nodes[:, 0]
     x1 = params["bore_thickness"]
