@@ -8,7 +8,7 @@ import numpy as np
 from .config import REPRESENTATIONS, SampleGenerationConfig, clip_offsets_to_bounds, resolve_geometry_parameters
 from .features import contour_derivative_features, empty_features, resample_contour_uniform_arc_length
 from .geometry import build_disc_contour, sanitize_geometry_parameters
-from .mesh_ops import assign_zone_and_region_from_contour, generate_mesh
+from .mesh_ops import assign_zone_and_region_from_radius, generate_mesh
 from .physics import compute_life_raw, compute_phase_equivalent_stresses, compute_stress_max
 
 
@@ -20,19 +20,18 @@ def _compute_targets(
     zone_ids: np.ndarray,
     region_ids: np.ndarray,
     geometry_params: dict[str, float],
-    landmarks_mm: dict[str, np.ndarray],
-    contour_points: np.ndarray,
+    radial_breaks: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     phase_stress = compute_phase_equivalent_stresses(
         nodes=nodes,
         zone_ids=zone_ids,
         region_ids=region_ids,
         geometry_params=geometry_params,
-        landmarks_mm=landmarks_mm,
-        contour_points=contour_points,
+        radial_breaks=radial_breaks,
     )
     stress_max_vm = compute_stress_max(phase_stress)
-    life_raw = compute_life_raw(phase_stress, region_ids)
+    # Life uses zone_ids (5-zone Basquin) so transition zones have distinct fatigue laws.
+    life_raw = compute_life_raw(phase_stress, zone_ids)
     return phase_stress, stress_max_vm, life_raw
 
 
@@ -52,43 +51,50 @@ def generate_sample(
     actual_params = sanitize_geometry_parameters(resolve_geometry_parameters(clipped_offsets))
 
     contour = build_disc_contour(actual_params, points_per_side=cfg.contour_points_per_side)
+    radial_breaks = contour.metadata["radial_breaks_mm"]
+
     mesh = generate_mesh(
         contour_points=contour.points,
         grid_x=cfg.mesh_grid_points_x,
         grid_r=cfg.mesh_grid_points_r,
         seed=int(seed),
+        radial_breaks=radial_breaks,
     )
 
-    mesh_zone_id, mesh_region_id, nearest_idx, distance_to_contour = assign_zone_and_region_from_contour(
+    # Zone and region assigned purely from radius thresholds – no nearest-contour voting.
+    mesh_zone_id, mesh_region_id = assign_zone_and_region_from_radius(
         nodes=mesh.nodes,
-        contour_points=contour.points,
-        contour_zone_ids=contour.zone_ids,
+        radial_breaks=radial_breaks,
     )
+    nearest_idx = mesh.nearest_contour_index
+    distance_to_contour = mesh.distance_to_contour
 
     mesh_phase_stress, mesh_stress_max_vm, mesh_life_raw = _compute_targets(
         nodes=mesh.nodes,
         zone_ids=mesh_zone_id,
         region_ids=mesh_region_id,
         geometry_params=actual_params,
-        landmarks_mm=contour.landmarks_mm,
-        contour_points=contour.points,
+        radial_breaks=radial_breaks,
     )
 
+    contour_zone_id, contour_region_id = assign_zone_and_region_from_radius(
+        nodes=contour.points,
+        radial_breaks=radial_breaks,
+    )
     contour_phase_stress, contour_stress_max_vm, contour_life_raw = _compute_targets(
         nodes=contour.points,
-        zone_ids=contour.zone_ids,
-        region_ids=contour.region_ids,
+        zone_ids=contour_zone_id,
+        region_ids=contour_region_id,
         geometry_params=actual_params,
-        landmarks_mm=contour.landmarks_mm,
-        contour_points=contour.points,
+        radial_breaks=radial_breaks,
     )
 
     if representation == "edge":
         edge_points, edge_arc, edge_zone, edge_region = resample_contour_uniform_arc_length(
             points=contour.points,
             arc_length_mm=contour.arc_length_mm,
-            zone_ids=contour.zone_ids,
-            region_ids=contour.region_ids,
+            zone_ids=contour_zone_id,
+            region_ids=contour_region_id,
             n_samples=contour.points.shape[0],
         )
 
@@ -97,8 +103,7 @@ def generate_sample(
             zone_ids=edge_zone,
             region_ids=edge_region,
             geometry_params=actual_params,
-            landmarks_mm=contour.landmarks_mm,
-            contour_points=contour.points,
+            radial_breaks=radial_breaks,
         )
 
         if include_derivatives:
@@ -143,8 +148,8 @@ def generate_sample(
         interior_phase = mesh_phase_stress[keep]
 
         node_coords = np.vstack([contour.points, interior_nodes])
-        zone_id = np.concatenate([contour.zone_ids, interior_zone])
-        region_id = np.concatenate([contour.region_ids, interior_region])
+        zone_id = np.concatenate([contour_zone_id, interior_zone])
+        region_id = np.concatenate([contour_region_id, interior_region])
         stress = np.concatenate([contour_stress_max_vm, interior_stress])
         life = np.concatenate([contour_life_raw, interior_life])
         phase = np.vstack([contour_phase_stress, interior_phase])
@@ -190,8 +195,8 @@ def generate_sample(
     out["seed"] = int(seed)
     out["triangles"] = mesh.triangles.astype(np.int32)
     out["contour_points_mm"] = contour.points.astype(np.float64)
-    out["contour_zone_id"] = contour.zone_ids.astype(np.int32)
-    out["contour_region_id"] = contour.region_ids.astype(np.int32)
+    out["contour_zone_id"] = contour_zone_id.astype(np.int32)
+    out["contour_region_id"] = contour_region_id.astype(np.int32)
     out["contour_arc_length_mm"] = contour.arc_length_mm.astype(np.float64)
     out["zone_names"] = np.array(contour.zone_names, dtype="S32")
     return out

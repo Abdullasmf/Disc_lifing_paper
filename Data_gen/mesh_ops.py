@@ -1,9 +1,9 @@
-"""Meshing and contour-provenance transfer."""
+"""Meshing and radius-threshold zone/region assignment."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from matplotlib.path import Path
@@ -15,7 +15,6 @@ from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
 
 JITTER_FACTOR = 0.32
 # 0.32 keeps the cloud randomized but avoids frequent edge leakage in thin-web cases.
-INV_DIST_EPS = 1e-6
 
 
 @dataclass
@@ -38,7 +37,14 @@ def generate_mesh(
     grid_x: int,
     grid_r: int,
     seed: int = 0,
+    radial_breaks: Optional[np.ndarray] = None,
 ) -> MeshData:
+    """Generate a Delaunay mesh from the contour with optional transition-band refinement.
+
+    radial_breaks: array [r0, r1, r2, r3, r4, r5].  When provided, extra interior
+    points are sampled uniformly within the lower- and upper-transition radial bands
+    so that the mesh is locally denser near the stress-concentrating shoulder regions.
+    """
     poly = Path(contour_points)
     x_min, r_min = contour_points.min(axis=0)
     x_max, r_max = contour_points.max(axis=0)
@@ -57,7 +63,24 @@ def generate_mesh(
     candidates[:, 1] += rng.uniform(-JITTER_FACTOR * dr, JITTER_FACTOR * dr, size=candidates.shape[0])
 
     interior = candidates[poly.contains_points(candidates)]
-    points = _unique_rows(np.vstack([contour_points, interior]))
+    interior_list = [interior]
+
+    # Targeted refinement in transition bands – denser sampling near high-gradient regions.
+    if radial_breaks is not None and len(radial_breaks) >= 5:
+        n_extra = max(grid_x * 3, 60)
+        for r_start, r_end in [
+            (float(radial_breaks[1]), float(radial_breaks[2])),
+            (float(radial_breaks[3]), float(radial_breaks[4])),
+        ]:
+            ex = rng.uniform(x_min, x_max, n_extra)
+            er = rng.uniform(r_start, r_end, n_extra)
+            extra_cands = np.column_stack([ex, er])
+            extra_inside = extra_cands[poly.contains_points(extra_cands)]
+            if extra_inside.shape[0] > 0:
+                interior_list.append(extra_inside)
+
+    combined = np.vstack(interior_list)
+    points = _unique_rows(np.vstack([contour_points, combined]))
 
     tri = Delaunay(points)
     triangles = tri.simplices
@@ -80,16 +103,6 @@ def generate_mesh(
     )
 
 
-def _weighted_majority(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
-    out = np.empty(values.shape[0], dtype=np.int32)
-    for i in range(values.shape[0]):
-        uniq, inv = np.unique(values[i], return_inverse=True)
-        score = np.zeros(uniq.shape[0], dtype=np.float64)
-        np.add.at(score, inv, weights[i])
-        out[i] = int(uniq[np.argmax(score)])
-    return out
-
-
 def _region_from_zone(zone_ids: np.ndarray) -> np.ndarray:
     lookup = np.array([
         REGION_NAME_TO_ID[ZONE_TO_REGION[name]]
@@ -98,25 +111,34 @@ def _region_from_zone(zone_ids: np.ndarray) -> np.ndarray:
     return lookup[zone_ids]
 
 
-def assign_zone_and_region_from_contour(
+def assign_zone_and_region_from_radius(
     nodes: np.ndarray,
-    contour_points: np.ndarray,
-    contour_zone_ids: np.ndarray,
-    k_neighbors: int = 5,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    tree = cKDTree(contour_points)
-    k = min(int(k_neighbors), contour_points.shape[0])
-    distances, indices = tree.query(nodes, k=k)
+    radial_breaks: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Assign zone and region to every node directly from its radial coordinate.
 
-    if k == 1:
-        distances = distances[:, None]
-        indices = indices[:, None]
+    Every node's zone is determined solely by comparing its r-coordinate against
+    the radial break thresholds [r0, r1, r2, r3, r4, r5].  No nearest-contour
+    voting is performed.
 
-    weights = 1.0 / (distances + INV_DIST_EPS)
-    zone_votes = contour_zone_ids[indices]
-    zone_ids = _weighted_majority(zone_votes, weights)
+    Parameters
+    ----------
+    nodes:
+        (N, 2) array of node coordinates [x, r].
+    radial_breaks:
+        1-D array of 6 radial station values [r0, r1, r2, r3, r4, r5].
+
+    Returns
+    -------
+    zone_ids, region_ids : (N,) int32 arrays
+    """
+    r = nodes[:, 1]
+    rb = radial_breaks
+    zone_ids = np.empty(r.shape[0], dtype=np.int32)
+    zone_ids[r <= rb[1]] = ZONE_NAME_TO_ID["bore"]
+    zone_ids[(r > rb[1]) & (r <= rb[2])] = ZONE_NAME_TO_ID["lower_transition"]
+    zone_ids[(r > rb[2]) & (r <= rb[3])] = ZONE_NAME_TO_ID["web"]
+    zone_ids[(r > rb[3]) & (r <= rb[4])] = ZONE_NAME_TO_ID["upper_transition"]
+    zone_ids[r > rb[4]] = ZONE_NAME_TO_ID["rim"]
     region_ids = _region_from_zone(zone_ids)
-
-    nearest_contour_index = indices[:, 0].astype(np.int32)
-    nearest_distance_mm = distances[:, 0].astype(np.float64)
-    return zone_ids, region_ids, nearest_contour_index, nearest_distance_mm
+    return zone_ids, region_ids
