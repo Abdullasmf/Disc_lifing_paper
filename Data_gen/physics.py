@@ -49,7 +49,7 @@ def _transition_concentration(
     Concentration is computed from the node's r-coordinate relative to the lower
     [r1, r2] and upper [r3, r4] transition bands.  A Gaussian bell is centred on
     each band; the peak amplitude is modulated by the inverse of the fillet radius.
-    This avoids the previous centrelline-stripe artifact caused by distance to a
+    This avoids the previous centerline-stripe artifact caused by distance to a
     fixed 2-D landmark point.
     """
     r = nodes[:, 1]
