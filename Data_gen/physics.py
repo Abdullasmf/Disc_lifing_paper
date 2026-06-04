@@ -9,7 +9,7 @@ Model summary (intentionally approximate, generation-focused):
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Optional
 
 import numpy as np
 
@@ -34,6 +34,13 @@ EPSILON_GUARD = 1e-6
 
 
 def _local_section_thickness(nodes: np.ndarray, params: Dict[str, float]) -> np.ndarray:
+    """Deprecated: template-based axial-region thickness estimate.
+
+    .. deprecated::
+        Pass *contour_points* to :func:`compute_phase_equivalent_stresses` to
+        use the geometry-derived :func:`_geometry_section_thickness` instead.
+        This fallback may be removed in a future cleanup.
+    """
     x = nodes[:, 0]
     x1 = params["bore_thickness"]
     x2 = x1 + params["web_length"]
@@ -61,6 +68,40 @@ def _local_section_thickness(nodes: np.ndarray, params: Dict[str, float]) -> np.
     return np.maximum(thickness, MIN_THICKNESS_MM)
 
 
+def _geometry_section_thickness(nodes: np.ndarray, contour_points: np.ndarray) -> np.ndarray:
+    """Compute local section thickness from the actual disc contour geometry.
+
+    For each node's axial position x, the thickness is estimated as the
+    front-to-rear extent of the meridional section:
+
+        thickness(x) = upper_radius(x) - lower_radius(x)
+
+    where upper/lower radii are the maximum/minimum r values found on the
+    contour at each axial coordinate.  Interpolation is used within the
+    valid axial span and node positions are clipped to that span.
+    """
+    cx = contour_points[:, 0]
+    cr = contour_points[:, 1]
+
+    sort_idx = np.argsort(cx)
+    cx_s = cx[sort_idx]
+    cr_s = cr[sort_idx]
+
+    # Build lower and upper envelopes at unique axial positions.
+    x_unique, inv = np.unique(cx_s, return_inverse=True)
+    r_lower = np.full(x_unique.shape[0], np.inf, dtype=np.float64)
+    r_upper = np.full(x_unique.shape[0], -np.inf, dtype=np.float64)
+    np.minimum.at(r_lower, inv, cr_s)
+    np.maximum.at(r_upper, inv, cr_s)
+
+    # Interpolate at each node's axial position, clipped to the valid span.
+    node_x = np.clip(nodes[:, 0], x_unique[0], x_unique[-1])
+    lower = np.interp(node_x, x_unique, r_lower)
+    upper = np.interp(node_x, x_unique, r_upper)
+
+    return np.maximum(upper - lower, MIN_THICKNESS_MM)
+
+
 def _concentration_factor(nodes: np.ndarray, params: Dict[str, float], landmarks_mm: Dict[str, np.ndarray]) -> np.ndarray:
     bore_landmarks = np.vstack([landmarks_mm["bore_web_lower"], landmarks_mm["bore_web_upper"]])
     rim_landmarks = np.vstack([landmarks_mm["web_rim_lower"], landmarks_mm["web_rim_upper"]])
@@ -82,8 +123,14 @@ def compute_phase_equivalent_stresses(
     region_ids: np.ndarray,
     geometry_params: Dict[str, float],
     landmarks_mm: Dict[str, np.ndarray],
+    contour_points: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Compute synthetic equivalent stress for all 7 phases at each node (MPa-like scale)."""
+    """Compute synthetic equivalent stress for all 7 phases at each node (MPa-like scale).
+
+    When *contour_points* is provided the local section thickness is derived from
+    the actual contour geometry (upper_radius(x) - lower_radius(x)).  Otherwise
+    the deprecated template-based estimate is used as a fallback.
+    """
     r = nodes[:, 1]
     r_inner = float(landmarks_mm["r_inner"][0])
     r_outer = float(landmarks_mm["r_outer"][0])
@@ -94,7 +141,10 @@ def compute_phase_equivalent_stresses(
     hoop_term = 0.55 + 1.30 * np.power(r_norm, 2.0)
     combined_rotor_shape = 0.45 * radial_term + 0.55 * hoop_term
 
-    section_thickness = _local_section_thickness(nodes, geometry_params)
+    if contour_points is not None:
+        section_thickness = _geometry_section_thickness(nodes, contour_points)
+    else:
+        section_thickness = _local_section_thickness(nodes, geometry_params)
     t_ref = np.median(section_thickness)
     thin_section_amp = np.power(np.clip(t_ref / section_thickness, 0.55, 1.9), 0.70)
 
