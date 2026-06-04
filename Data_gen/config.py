@@ -44,13 +44,13 @@ PUBLIC_GEOMETRY_PARAMETERS = (
 NOMINAL_GEOMETRY_MM: Dict[str, float] = {
     "bore_radius_inner": 24.0,
     "bore_height": 11.0,
-    "bore_thickness": 20.0,
+    "bore_thickness": 30.0,   # bore > rim > web enforced: 30 > 20 > 10
     "lower_transition_height": 8.0,
     "web_height": 40.0,
-    "web_thickness": 10.5,
+    "web_thickness": 10.0,
     "upper_transition_height": 9.0,
     "rim_height": 15.0,
-    "rim_thickness": 24.0,
+    "rim_thickness": 20.0,
     "lower_fillet_radius": 2.2,
     "upper_fillet_radius": 2.6,
 }
