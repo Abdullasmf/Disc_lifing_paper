@@ -1,85 +1,29 @@
-"""Lightweight physically-motivated rotating-disc stress/life surrogate.
-
-Model summary (intentionally approximate, generation-focused):
-- Per-phase equivalent stress is built from radial/hoop-like rotating-disc terms.
-- Phase scaling follows speed_factor^2 to mimic centrifugal dependence.
-- Local thickness and transition-landmark proximity add geometric concentration effects.
-- Fatigue life uses phase-wise Miner accumulation with region-specific Basquin S-N laws.
-"""
+"""Lightweight physically-motivated stress/life surrogate."""
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict
 
 import numpy as np
 
-from .config import CYCLE_PHASE_WEIGHTS, CYCLE_SPEED_FACTORS
+from .config import CYCLE_PHASE_WEIGHTS, CYCLE_SPEED_FACTORS, REGION_NAME_TO_ID
 
-
-# Mild region scaling: keeps region discontinuity but avoids dominating all other effects.
-REGION_STRESS_SCALE = np.array([1.08, 1.00, 1.14], dtype=np.float64)
-# Bore and rim are slightly amplified vs web; kept close to 1.0 so geometry and phase effects dominate.
-
-# Basquin coefficients intentionally discontinuous across bore/web/rim.
-REGION_BASQUIN_C = np.array([2.2e12, 7.5e11, 4.2e12], dtype=np.float64)
-REGION_BASQUIN_M = np.array([4.2, 5.0, 5.6], dtype=np.float64)
-# Synthetic calibration targets plausible relative discontinuity (not material-card fidelity).
+REGION_STRESS_SCALE = np.array([1.08, 1.00, 1.13], dtype=np.float64)
+# Region scaling by index: 0=bore, 1=web, 2=rim.
+REGION_BASQUIN_C = np.array([2.0e12, 7.2e11, 4.0e12], dtype=np.float64)
+# 5.1 is the web-region exponent (index 1); transition zones use it via zone-to-web mapping.
+REGION_BASQUIN_M = np.array([4.2, 5.1, 5.6], dtype=np.float64)
 
 MIN_THICKNESS_MM = 1e-3
-SIGMA_REF_MPA = 180.0
+SIGMA_REF_MPA = 178.0
+# Slightly reduced reference stress to avoid overly stiff scaling in the new section proportions.
 AMPLITUDE_HALF_RANGE = 0.5
 AMPLITUDE_SPEED_BASE = 0.85
 AMPLITUDE_SPEED_GAIN = 0.15
-EPSILON_GUARD = 1e-6
-
-
-def _local_section_thickness(nodes: np.ndarray, params: Dict[str, float]) -> np.ndarray:
-    """Deprecated: template-based axial-region thickness estimate.
-
-    .. deprecated::
-        Pass *contour_points* to :func:`compute_phase_equivalent_stresses` to
-        use the geometry-derived :func:`_geometry_section_thickness` instead.
-        This fallback may be removed in a future cleanup.
-    """
-    x = nodes[:, 0]
-    x1 = params["bore_thickness"]
-    x2 = x1 + params["web_length"]
-    x3 = x2 + params["rim_length"]
-
-    t_bore = params["bore_thickness"]
-    t_web = params["web_thickness"]
-    t_rim = params["rim_thickness"]
-
-    thickness = np.full_like(x, t_web, dtype=np.float64)
-    thickness[x <= x1] = t_bore
-    thickness[x >= x2] = t_rim
-
-    in_web = (x > x1) & (x < x2)
-    if np.any(in_web):
-        xi = (x[in_web] - x1) / max(x2 - x1, EPSILON_GUARD)
-        thickness[in_web] = (1.0 - xi) * t_web + xi * (0.85 * t_web + 0.15 * t_rim)
-
-    in_rim_transition = (x >= x2) & (x < x3)
-    if np.any(in_rim_transition):
-        xi = (x[in_rim_transition] - x2) / max(x3 - x2, EPSILON_GUARD)
-        thickness[in_rim_transition] = (1.0 - xi) * (0.85 * t_web + 0.15 * t_rim) + xi * t_rim
-
-    # Minimum section floor avoids singular amplification in very thin synthetic geometries.
-    return np.maximum(thickness, MIN_THICKNESS_MM)
+EPS = 1e-6
 
 
 def _geometry_section_thickness(nodes: np.ndarray, contour_points: np.ndarray) -> np.ndarray:
-    """Compute local section thickness from the actual disc contour geometry.
-
-    For each node's axial position x, the thickness is estimated as the
-    front-to-rear extent of the meridional section:
-
-        thickness(x) = upper_radius(x) - lower_radius(x)
-
-    where upper/lower radii are the maximum/minimum r values found on the
-    contour at each axial coordinate.  Interpolation is used within the
-    valid axial span and node positions are clipped to that span.
-    """
     cx = contour_points[:, 0]
     cr = contour_points[:, 1]
 
@@ -87,77 +31,87 @@ def _geometry_section_thickness(nodes: np.ndarray, contour_points: np.ndarray) -
     cx_s = cx[sort_idx]
     cr_s = cr[sort_idx]
 
-    # Build lower and upper envelopes at unique axial positions.
     x_unique, inv = np.unique(cx_s, return_inverse=True)
     r_lower = np.full(x_unique.shape[0], np.inf, dtype=np.float64)
     r_upper = np.full(x_unique.shape[0], -np.inf, dtype=np.float64)
     np.minimum.at(r_lower, inv, cr_s)
     np.maximum.at(r_upper, inv, cr_s)
 
-    # Interpolate at each node's axial position, clipped to the valid span.
     node_x = np.clip(nodes[:, 0], x_unique[0], x_unique[-1])
     lower = np.interp(node_x, x_unique, r_lower)
     upper = np.interp(node_x, x_unique, r_upper)
-
     return np.maximum(upper - lower, MIN_THICKNESS_MM)
 
 
-def _concentration_factor(nodes: np.ndarray, params: Dict[str, float], landmarks_mm: Dict[str, np.ndarray]) -> np.ndarray:
-    bore_landmarks = np.vstack([landmarks_mm["bore_web_lower"], landmarks_mm["bore_web_upper"]])
-    rim_landmarks = np.vstack([landmarks_mm["web_rim_lower"], landmarks_mm["web_rim_upper"]])
+def _transition_concentration(
+    nodes: np.ndarray,
+    params: Dict[str, float],
+    landmarks_mm: Dict[str, np.ndarray],
+) -> np.ndarray:
+    lower_marks = np.vstack([
+        landmarks_mm["lower_transition_start"],
+        landmarks_mm["lower_transition_end"],
+    ])
+    upper_marks = np.vstack([
+        landmarks_mm["upper_transition_start"],
+        landmarks_mm["upper_transition_end"],
+    ])
 
-    d_bore = np.min(np.linalg.norm(nodes[:, None, :] - bore_landmarks[None, :, :], axis=2), axis=1)
-    d_rim = np.min(np.linalg.norm(nodes[:, None, :] - rim_landmarks[None, :, :], axis=2), axis=1)
+    d_lower = np.min(np.linalg.norm(nodes[:, None, :] - lower_marks[None, :, :], axis=2), axis=1)
+    d_upper = np.min(np.linalg.norm(nodes[:, None, :] - upper_marks[None, :, :], axis=2), axis=1)
 
-    lb = max(1.5 * params["bore_web_fillet_radius"], 0.8)
-    lr = max(1.5 * params["web_rim_fillet_radius"], 0.8)
+    r_lower = max(params["lower_fillet_radius"], 0.3)
+    r_upper = max(params["upper_fillet_radius"], 0.3)
 
-    # Bore-web transition is biased slightly stronger than web-rim in this synthetic v2 model.
-    k_bore = 1.0 + 0.24 * np.exp(-(d_bore / lb) ** 2)
-    k_rim = 1.0 + 0.18 * np.exp(-(d_rim / lr) ** 2)
-    return k_bore * k_rim
+    ll = max(1.1 * r_lower, 0.45)
+    lu = max(1.1 * r_upper, 0.45)
+
+    gain_lower = 0.55 * np.clip((2.8 / r_lower) ** 1.1, 0.35, 2.8)
+    gain_upper = 0.45 * np.clip((2.8 / r_upper) ** 1.1, 0.35, 2.8)
+
+    k_lower = 1.0 + gain_lower * np.exp(-(d_lower / ll) ** 2)
+    k_upper = 1.0 + gain_upper * np.exp(-(d_upper / lu) ** 2)
+    return k_lower * k_upper
 
 
 def compute_phase_equivalent_stresses(
     nodes: np.ndarray,
+    zone_ids: np.ndarray,
     region_ids: np.ndarray,
     geometry_params: Dict[str, float],
     landmarks_mm: Dict[str, np.ndarray],
-    contour_points: Optional[np.ndarray] = None,
+    contour_points: np.ndarray,
 ) -> np.ndarray:
-    """Compute synthetic equivalent stress for all 7 phases at each node (MPa-like scale).
-
-    When *contour_points* is provided the local section thickness is derived from
-    the actual contour geometry (upper_radius(x) - lower_radius(x)).  Otherwise
-    the deprecated template-based estimate is used as a fallback.
-    """
     r = nodes[:, 1]
     r_inner = float(landmarks_mm["r_inner"][0])
     r_outer = float(landmarks_mm["r_outer"][0])
-    span = max(r_outer - r_inner, EPSILON_GUARD)
+    span = max(r_outer - r_inner, EPS)
     r_norm = np.clip((r - r_inner) / span, 0.0, 1.0)
 
-    radial_term = 0.30 + 0.70 * np.power(r_norm, 1.35)
-    hoop_term = 0.55 + 1.30 * np.power(r_norm, 2.0)
-    combined_rotor_shape = 0.45 * radial_term + 0.55 * hoop_term
+    radial_term = 0.30 + 0.70 * np.power(r_norm, 1.30)
+    hoop_term = 0.55 + 1.32 * np.power(r_norm, 2.0)
+    rotor_shape = 0.44 * radial_term + 0.56 * hoop_term
 
-    if contour_points is not None:
-        section_thickness = _geometry_section_thickness(nodes, contour_points)
-    else:
-        section_thickness = _local_section_thickness(nodes, geometry_params)
+    section_thickness = _geometry_section_thickness(nodes, contour_points)
     t_ref = np.median(section_thickness)
-    thin_section_amp = np.power(np.clip(t_ref / section_thickness, 0.55, 1.9), 0.70)
+    thin_amp = np.power(np.clip(t_ref / section_thickness, 0.55, 1.95), 0.72)
 
-    geom_conc = _concentration_factor(nodes, geometry_params, landmarks_mm)
-    geom_gain = 1.0 + 0.0015 * (
-        geometry_params["rim_thickness"] + geometry_params["web_length"] + geometry_params["bore_radius"]
+    transition_conc = _transition_concentration(nodes, geometry_params, landmarks_mm)
+
+    zone_multiplier = np.ones(nodes.shape[0], dtype=np.float64)
+    zone_multiplier[zone_ids == 1] *= 1.03
+    zone_multiplier[zone_ids == 3] *= 1.03
+
+    geom_gain = 1.0 + 0.0012 * (
+        geometry_params["rim_thickness"] + geometry_params["web_height"] + geometry_params["bore_radius_inner"]
     )
 
     base = (
         SIGMA_REF_MPA
-        * combined_rotor_shape
-        * thin_section_amp
-        * geom_conc
+        * rotor_shape
+        * thin_amp
+        * transition_conc
+        * zone_multiplier
         * REGION_STRESS_SCALE[region_ids]
         * geom_gain
     )
@@ -168,24 +122,17 @@ def compute_phase_equivalent_stresses(
 
 
 def compute_stress_max(phase_stress: np.ndarray) -> np.ndarray:
-    return np.max(phase_stress, axis=1)
+    return np.max(phase_stress, axis=1).astype(np.float64)
 
 
 def compute_life_raw(phase_stress: np.ndarray, region_ids: np.ndarray) -> np.ndarray:
-    """Compute raw life via phase-wise stress amplitudes and Miner accumulation.
-
-    amplitude surrogate:
-      sigma_a = AMPLITUDE_HALF_RANGE * sigma_eq * (AMPLITUDE_SPEED_BASE + AMPLITUDE_SPEED_GAIN * speed_factor)
-    region S-N law: N = C_region * sigma_a^(-m_region)
-    cycle damage: D = sum_i(w_i / N_i), life_raw = 1 / D
-    """
-    sigma_eq = np.maximum(phase_stress, EPSILON_GUARD)
+    sigma_eq = np.maximum(phase_stress, EPS)
     amplitude_scale = AMPLITUDE_HALF_RANGE * (AMPLITUDE_SPEED_BASE + AMPLITUDE_SPEED_GAIN * CYCLE_SPEED_FACTORS)
-    sigma_a = sigma_eq * amplitude_scale[None, :]  # shape: (nodes, phases)
+    sigma_a = sigma_eq * amplitude_scale[None, :]
 
     basquin_c = REGION_BASQUIN_C[region_ids][:, None]
     basquin_m = REGION_BASQUIN_M[region_ids][:, None]
-    n_fail = basquin_c * np.power(np.maximum(sigma_a, EPSILON_GUARD), -basquin_m)
+    n_fail = basquin_c * np.power(np.maximum(sigma_a, EPS), -basquin_m)
 
     damage_per_cycle = np.sum(CYCLE_PHASE_WEIGHTS[None, :] / np.maximum(n_fail, 1e-20), axis=1)
     return (1.0 / np.maximum(damage_per_cycle, 1e-20)).astype(np.float64)

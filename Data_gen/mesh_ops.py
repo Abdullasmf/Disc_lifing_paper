@@ -1,4 +1,4 @@
-"""Meshing and robust contour-provenance transfer helpers."""
+"""Meshing and contour-provenance transfer."""
 
 from __future__ import annotations
 
@@ -9,6 +9,13 @@ import numpy as np
 from matplotlib.path import Path
 from scipy.spatial import Delaunay, cKDTree
 from skfem import MeshTri
+
+from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
+
+
+JITTER_FACTOR = 0.32
+# 0.32 keeps the cloud randomized but avoids frequent edge leakage in thin-web cases.
+INV_DIST_EPS = 1e-6
 
 
 @dataclass
@@ -23,8 +30,7 @@ class MeshData:
 
 def _unique_rows(points: np.ndarray) -> np.ndarray:
     uniq, idx = np.unique(points, axis=0, return_index=True)
-    order = np.argsort(idx)
-    return uniq[order]
+    return uniq[np.argsort(idx)]
 
 
 def generate_mesh(
@@ -33,32 +39,25 @@ def generate_mesh(
     grid_r: int,
     seed: int = 0,
 ) -> MeshData:
-    """Generate triangular mesh from contour and interior point cloud."""
     poly = Path(contour_points)
     x_min, r_min = contour_points.min(axis=0)
     x_max, r_max = contour_points.max(axis=0)
 
     rng = np.random.default_rng(seed)
-
-    # Cell spacing for jitter bounds
     dx = (x_max - x_min) / max(grid_x - 1, 1)
     dr = (r_max - r_min) / max(grid_r - 1, 1)
 
-    # Regular grid candidates
     gx = np.linspace(x_min, x_max, grid_x)
     gr = np.linspace(r_min, r_max, grid_r)
     xx, rr = np.meshgrid(gx, gr, indexing="xy")
     candidates = np.column_stack([xx.ravel(), rr.ravel()])
 
-    # Bounded random jitter: at most 0.35 of local grid spacing per axis
-    candidates[:, 0] += rng.uniform(-0.35 * dx, 0.35 * dx, size=candidates.shape[0])
-    candidates[:, 1] += rng.uniform(-0.35 * dr, 0.35 * dr, size=candidates.shape[0])
+    # Mild de-regularization while reducing edge over-jitter in thin sections.
+    candidates[:, 0] += rng.uniform(-JITTER_FACTOR * dx, JITTER_FACTOR * dx, size=candidates.shape[0])
+    candidates[:, 1] += rng.uniform(-JITTER_FACTOR * dr, JITTER_FACTOR * dr, size=candidates.shape[0])
 
-    # Keep only candidates that fall inside the polygon after jitter
     interior = candidates[poly.contains_points(candidates)]
-
-    points = np.vstack([contour_points, interior])
-    points = _unique_rows(points)
+    points = _unique_rows(np.vstack([contour_points, interior]))
 
     tri = Delaunay(points)
     triangles = tri.simplices
@@ -73,8 +72,8 @@ def generate_mesh(
 
     return MeshData(
         mesh=mesh,
-        nodes=points,
-        triangles=triangles,
+        nodes=points.astype(np.float64),
+        triangles=triangles.astype(np.int32),
         boundary_node_ids=boundary_nodes,
         nearest_contour_index=nearest_contour_index.astype(np.int32),
         distance_to_contour=distance_to_contour.astype(np.float64),
@@ -91,17 +90,20 @@ def _weighted_majority(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
     return out
 
 
-def assign_region_and_segment_from_contour(
+def _region_from_zone(zone_ids: np.ndarray) -> np.ndarray:
+    lookup = np.array([
+        REGION_NAME_TO_ID[ZONE_TO_REGION[name]]
+        for name, _ in sorted(ZONE_NAME_TO_ID.items(), key=lambda item: item[1])
+    ], dtype=np.int32)
+    return lookup[zone_ids]
+
+
+def assign_zone_and_region_from_contour(
     nodes: np.ndarray,
     contour_points: np.ndarray,
-    contour_region_ids: np.ndarray,
-    contour_segment_ids: np.ndarray,
+    contour_zone_ids: np.ndarray,
     k_neighbors: int = 5,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Assign robust region/segment IDs using segment-aware contour provenance.
-
-    Uses inverse-distance weighted voting over nearest contour samples.
-    """
     tree = cKDTree(contour_points)
     k = min(int(k_neighbors), contour_points.shape[0])
     distances, indices = tree.query(nodes, k=k)
@@ -110,13 +112,11 @@ def assign_region_and_segment_from_contour(
         distances = distances[:, None]
         indices = indices[:, None]
 
-    weights = 1.0 / (distances + 1e-6)
-    region_votes = contour_region_ids[indices]
-    segment_votes = contour_segment_ids[indices]
-
-    region_ids = _weighted_majority(region_votes, weights)
-    segment_ids = _weighted_majority(segment_votes, weights)
+    weights = 1.0 / (distances + INV_DIST_EPS)
+    zone_votes = contour_zone_ids[indices]
+    zone_ids = _weighted_majority(zone_votes, weights)
+    region_ids = _region_from_zone(zone_ids)
 
     nearest_contour_index = indices[:, 0].astype(np.int32)
     nearest_distance_mm = distances[:, 0].astype(np.float64)
-    return region_ids, segment_ids, nearest_contour_index, nearest_distance_mm
+    return zone_ids, region_ids, nearest_contour_index, nearest_distance_mm
