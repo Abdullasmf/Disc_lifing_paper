@@ -9,11 +9,14 @@ import numpy as np
 from .config import CYCLE_PHASE_WEIGHTS, CYCLE_SPEED_FACTORS, REGION_NAME_TO_ID
 
 REGION_STRESS_SCALE = np.array([1.08, 1.00, 1.13], dtype=np.float64)
+# Region scaling by index: 0=bore, 1=web, 2=rim.
 REGION_BASQUIN_C = np.array([2.0e12, 7.2e11, 4.0e12], dtype=np.float64)
+# 5.1 is the web-region exponent (index 1); transition zones use it via zone-to-web mapping.
 REGION_BASQUIN_M = np.array([4.2, 5.1, 5.6], dtype=np.float64)
 
 MIN_THICKNESS_MM = 1e-3
 SIGMA_REF_MPA = 178.0
+# Slightly reduced reference stress to avoid overly stiff scaling in the new section proportions.
 AMPLITUDE_HALF_RANGE = 0.5
 AMPLITUDE_SPEED_BASE = 0.85
 AMPLITUDE_SPEED_GAIN = 0.15
@@ -57,11 +60,17 @@ def _transition_concentration(
     d_lower = np.min(np.linalg.norm(nodes[:, None, :] - lower_marks[None, :, :], axis=2), axis=1)
     d_upper = np.min(np.linalg.norm(nodes[:, None, :] - upper_marks[None, :, :], axis=2), axis=1)
 
-    ll = max(1.4 * params["lower_fillet_radius"], 0.7)
-    lu = max(1.4 * params["upper_fillet_radius"], 0.7)
+    r_lower = max(params["lower_fillet_radius"], 0.3)
+    r_upper = max(params["upper_fillet_radius"], 0.3)
 
-    k_lower = 1.0 + 0.26 * np.exp(-(d_lower / ll) ** 2)
-    k_upper = 1.0 + 0.20 * np.exp(-(d_upper / lu) ** 2)
+    ll = max(1.1 * r_lower, 0.45)
+    lu = max(1.1 * r_upper, 0.45)
+
+    gain_lower = 0.55 * np.clip((2.8 / r_lower) ** 1.1, 0.35, 2.8)
+    gain_upper = 0.45 * np.clip((2.8 / r_upper) ** 1.1, 0.35, 2.8)
+
+    k_lower = 1.0 + gain_lower * np.exp(-(d_lower / ll) ** 2)
+    k_upper = 1.0 + gain_upper * np.exp(-(d_upper / lu) ** 2)
     return k_lower * k_upper
 
 

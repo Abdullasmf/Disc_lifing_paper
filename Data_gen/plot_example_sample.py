@@ -22,6 +22,9 @@ except ImportError:
     from Data_gen.sample_generator import generate_sample
 
 
+CURVATURE_FEATURE_INDEX = 2  # node_features order: tangent_x, tangent_r, curvature, curvature_gradient
+
+
 def _load_offsets(json_path: Path | None) -> dict[str, float]:
     if json_path is None:
         return {}
@@ -89,8 +92,8 @@ def create_example_plot(
     ax[4].set_aspect("equal", adjustable="box")
     fig.colorbar(tc4, ax=ax[4], fraction=0.046)
 
-    if representation == "edge" and sample["node_features"].shape[1] >= 3:
-        curv = sample["node_features"][:, 2]
+    if representation == "edge" and sample["node_features"].shape[1] > CURVATURE_FEATURE_INDEX:
+        curv = sample["node_features"][:, CURVATURE_FEATURE_INDEX]
         sc5 = ax[5].scatter(sample["node_coords_mm"][:, 0], sample["node_coords_mm"][:, 1], c=curv, s=10, cmap="cividis")
         ax[5].set_title("Edge curvature")
         ax[5].set_aspect("equal", adjustable="box")

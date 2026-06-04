@@ -13,6 +13,11 @@ from skfem import MeshTri
 from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
 
 
+JITTER_FACTOR = 0.32
+# 0.32 keeps the cloud randomized but avoids frequent edge leakage in thin-web cases.
+INV_DIST_EPS = 1e-6
+
+
 @dataclass
 class MeshData:
     mesh: MeshTri
@@ -47,8 +52,9 @@ def generate_mesh(
     xx, rr = np.meshgrid(gx, gr, indexing="xy")
     candidates = np.column_stack([xx.ravel(), rr.ravel()])
 
-    candidates[:, 0] += rng.uniform(-0.32 * dx, 0.32 * dx, size=candidates.shape[0])
-    candidates[:, 1] += rng.uniform(-0.32 * dr, 0.32 * dr, size=candidates.shape[0])
+    # Mild de-regularization while reducing edge over-jitter in thin sections.
+    candidates[:, 0] += rng.uniform(-JITTER_FACTOR * dx, JITTER_FACTOR * dx, size=candidates.shape[0])
+    candidates[:, 1] += rng.uniform(-JITTER_FACTOR * dr, JITTER_FACTOR * dr, size=candidates.shape[0])
 
     interior = candidates[poly.contains_points(candidates)]
     points = _unique_rows(np.vstack([contour_points, interior]))
@@ -85,10 +91,11 @@ def _weighted_majority(values: np.ndarray, weights: np.ndarray) -> np.ndarray:
 
 
 def _region_from_zone(zone_ids: np.ndarray) -> np.ndarray:
-    region_ids = np.empty_like(zone_ids, dtype=np.int32)
-    for zone_name, zone_id in ZONE_NAME_TO_ID.items():
-        region_ids[zone_ids == zone_id] = REGION_NAME_TO_ID[ZONE_TO_REGION[zone_name]]
-    return region_ids
+    lookup = np.array([
+        REGION_NAME_TO_ID[ZONE_TO_REGION[name]]
+        for name, _ in sorted(ZONE_NAME_TO_ID.items(), key=lambda item: item[1])
+    ], dtype=np.int32)
+    return lookup[zone_ids]
 
 
 def assign_zone_and_region_from_contour(
@@ -105,7 +112,7 @@ def assign_zone_and_region_from_contour(
         distances = distances[:, None]
         indices = indices[:, None]
 
-    weights = 1.0 / (distances + 1e-6)
+    weights = 1.0 / (distances + INV_DIST_EPS)
     zone_votes = contour_zone_ids[indices]
     zone_ids = _weighted_majority(zone_votes, weights)
     region_ids = _region_from_zone(zone_ids)

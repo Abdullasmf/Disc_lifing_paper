@@ -15,7 +15,7 @@ Geometry family (fixed):
 - upper_transition
 - rim
 
-The generator keeps raw mm units, deterministic seeds, no added noise, and outputs stress/life targets for ML training.
+The generator keeps raw mm units, deterministic seeds, without added noise, and outputs stress/life targets for ML training.
 
 ### Single-sample API
 

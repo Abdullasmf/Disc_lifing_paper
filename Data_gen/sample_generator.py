@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Dict
 
 import numpy as np
 
 from .config import REPRESENTATIONS, SampleGenerationConfig, clip_offsets_to_bounds, resolve_geometry_parameters
 from .features import contour_derivative_features, empty_features, resample_contour_uniform_arc_length
-from .geometry import build_disc_contour
+from .geometry import build_disc_contour, sanitize_geometry_parameters
 from .mesh_ops import assign_zone_and_region_from_contour, generate_mesh
 from .physics import compute_life_raw, compute_phase_equivalent_stresses, compute_stress_max
+
+
+EDGE_DUPLICATE_EPS_MM = 1e-8
 
 
 def _compute_targets(
     nodes: np.ndarray,
     zone_ids: np.ndarray,
     region_ids: np.ndarray,
-    geometry_params: Dict[str, float],
-    landmarks_mm: Dict[str, np.ndarray],
+    geometry_params: dict[str, float],
+    landmarks_mm: dict[str, np.ndarray],
     contour_points: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     phase_stress = compute_phase_equivalent_stresses(
@@ -47,7 +49,7 @@ def generate_sample(
 
     cfg = SampleGenerationConfig()
     clipped_offsets = clip_offsets_to_bounds(param_offsets)
-    actual_params = resolve_geometry_parameters(clipped_offsets)
+    actual_params = sanitize_geometry_parameters(resolve_geometry_parameters(clipped_offsets))
 
     contour = build_disc_contour(actual_params, points_per_side=cfg.contour_points_per_side)
     mesh = generate_mesh(
@@ -131,7 +133,7 @@ def generate_sample(
             "arc_length_mm": edge_arc,
         }
     elif representation == "edge_proximity":
-        keep = (distance_to_contour <= cfg.edge_proximity_distance_mm) & (distance_to_contour > 1e-8)
+        keep = (distance_to_contour <= cfg.edge_proximity_distance_mm) & (distance_to_contour > EDGE_DUPLICATE_EPS_MM)
 
         interior_nodes = mesh.nodes[keep]
         interior_zone = mesh_zone_id[keep]

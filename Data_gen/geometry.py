@@ -40,8 +40,8 @@ def _region_from_zone(zone_ids: np.ndarray) -> np.ndarray:
 
 
 def _fillet_blend(u: np.ndarray, delta_t: float, fillet_radius: float) -> np.ndarray:
-    ratio = abs(delta_t) / max(fillet_radius, 1e-6)
-    power = np.clip(1.2 + 0.45 * ratio, 1.2, 4.0)
+    ratio = fillet_radius / max(abs(delta_t), 1e-6)
+    power = np.clip(2.2 - 0.5 * ratio, 1.6, 2.4)
     up = np.power(np.clip(u, 0.0, 1.0), power)
     down = np.power(np.clip(1.0 - u, 0.0, 1.0), power)
     return up / np.maximum(up + down, 1e-12)
@@ -110,6 +110,40 @@ def _validate_simple_closed_contour(points: np.ndarray) -> None:
                 raise ValueError("Generated contour is self-intersecting")
 
 
+
+
+def sanitize_geometry_parameters(params: Dict[str, float]) -> Dict[str, float]:
+    """Clip geometry values to physically constructible limits."""
+    out = {k: float(v) for k, v in params.items()}
+
+    for key in [
+        "bore_radius_inner",
+        "bore_height",
+        "bore_thickness",
+        "lower_transition_height",
+        "web_height",
+        "web_thickness",
+        "upper_transition_height",
+        "rim_height",
+        "rim_thickness",
+        "lower_fillet_radius",
+        "upper_fillet_radius",
+    ]:
+        out[key] = max(out[key], 1e-3)
+
+    out["rim_thickness"] = max(out["rim_thickness"], 0.65 * out["web_thickness"])
+
+    lower_dt = abs(out["bore_thickness"] - out["web_thickness"])
+    upper_dt = abs(out["rim_thickness"] - out["web_thickness"])
+
+    lower_limit = 0.5 * min(out["lower_transition_height"], max(lower_dt, 1e-6))
+    upper_limit = 0.5 * min(out["upper_transition_height"], max(upper_dt, 1e-6))
+
+    out["lower_fillet_radius"] = min(out["lower_fillet_radius"], lower_limit)
+    out["upper_fillet_radius"] = min(out["upper_fillet_radius"], upper_limit)
+    return out
+
+
 def validate_geometry_parameters(params: Dict[str, float]) -> None:
     positive_keys = [
         "bore_radius_inner",
@@ -163,24 +197,24 @@ def build_disc_contour(params: Dict[str, float], points_per_side: int = 220) -> 
     front_x = -0.5 * front_t
     rear_x = +0.5 * rear_t
 
-    inner_cap = np.column_stack([
-        np.linspace(-0.5 * params["bore_thickness"], +0.5 * params["bore_thickness"], 20, endpoint=False),
-        np.full(20, r0, dtype=np.float64),
-    ])
     outer_cap = np.column_stack([
-        np.linspace(+0.5 * params["rim_thickness"], -0.5 * params["rim_thickness"], 20, endpoint=False),
+        np.linspace(-0.5 * params["rim_thickness"], +0.5 * params["rim_thickness"], 20, endpoint=False),
         np.full(20, r5, dtype=np.float64),
+    ])
+    inner_cap = np.column_stack([
+        np.linspace(+0.5 * params["bore_thickness"], -0.5 * params["bore_thickness"], 20, endpoint=False),
+        np.full(20, r0, dtype=np.float64),
     ])
 
     front_points = np.column_stack([front_x, front_r])
     rear_points = np.column_stack([rear_x, rear_r])
 
-    contour_points = np.vstack([inner_cap, rear_points, outer_cap, front_points])
+    contour_points = np.vstack([front_points, outer_cap, rear_points, inner_cap])
     zone_ids = np.concatenate([
-        np.full(inner_cap.shape[0], ZONE_NAME_TO_ID["bore"], dtype=np.int32),
-        _zone_by_radius(rear_r, radial_breaks),
-        np.full(outer_cap.shape[0], ZONE_NAME_TO_ID["rim"], dtype=np.int32),
         _zone_by_radius(front_r, radial_breaks),
+        np.full(outer_cap.shape[0], ZONE_NAME_TO_ID["rim"], dtype=np.int32),
+        _zone_by_radius(rear_r, radial_breaks),
+        np.full(inner_cap.shape[0], ZONE_NAME_TO_ID["bore"], dtype=np.int32),
     ])
     region_ids = _region_from_zone(zone_ids)
 
