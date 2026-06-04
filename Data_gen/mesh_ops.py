@@ -31,17 +31,31 @@ def generate_mesh(
     contour_points: np.ndarray,
     grid_x: int,
     grid_r: int,
+    seed: int = 0,
 ) -> MeshData:
     """Generate triangular mesh from contour and interior point cloud."""
     poly = Path(contour_points)
     x_min, r_min = contour_points.min(axis=0)
     x_max, r_max = contour_points.max(axis=0)
 
+    rng = np.random.default_rng(seed)
+
+    # Cell spacing for jitter bounds
+    dx = (x_max - x_min) / max(grid_x - 1, 1)
+    dr = (r_max - r_min) / max(grid_r - 1, 1)
+
+    # Regular grid candidates
     gx = np.linspace(x_min, x_max, grid_x)
     gr = np.linspace(r_min, r_max, grid_r)
     xx, rr = np.meshgrid(gx, gr, indexing="xy")
-    interior = np.column_stack([xx.ravel(), rr.ravel()])
-    interior = interior[poly.contains_points(interior)]
+    candidates = np.column_stack([xx.ravel(), rr.ravel()])
+
+    # Bounded random jitter: at most 0.35 of local grid spacing per axis
+    candidates[:, 0] += rng.uniform(-0.35 * dx, 0.35 * dx, size=candidates.shape[0])
+    candidates[:, 1] += rng.uniform(-0.35 * dr, 0.35 * dr, size=candidates.shape[0])
+
+    # Keep only candidates that fall inside the polygon after jitter
+    interior = candidates[poly.contains_points(candidates)]
 
     points = np.vstack([contour_points, interior])
     points = _unique_rows(points)

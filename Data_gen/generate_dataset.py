@@ -47,6 +47,7 @@ def run_generation(cfg: GeneratorConfig):
                 contour_points=contour.points,
                 grid_x=cfg.mesh_grid_points_x,
                 grid_r=cfg.mesh_grid_points_r,
+                seed=sample_seed,
             )
 
             mesh_region_id, mesh_segment_id, mesh_nearest_contour_index, mesh_distance_to_contour = \
