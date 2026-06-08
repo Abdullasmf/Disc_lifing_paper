@@ -99,7 +99,7 @@ def create_example_plot(
     ax[2].set_xlabel("x [mm]"); ax[2].set_ylabel("r [mm]")
     fig.colorbar(tc2, ax=ax[2], fraction=0.046)
 
-    life_log10 = np.log10(np.maximum(full["life_raw"], 1e-30))
+    life_log10 = np.log10(np.maximum(full["life_raw"], 1e-10))
     tc3 = ax[3].tripcolor(triang, life_log10, cmap="viridis", shading="gouraud")
     _add_radial_threshold_lines(ax[3], rb)
     ax[3].set_title("log10(life_raw) [log scale]")

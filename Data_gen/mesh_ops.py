@@ -33,6 +33,7 @@ def _unique_rows(points: np.ndarray) -> np.ndarray:
 
 
 def _build_surface_interpolants(contour_points: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build radial interpolants of front and rear surfaces from contour points."""
     front = contour_points[contour_points[:, 0] <= 0.0]
     rear = contour_points[contour_points[:, 0] >= 0.0]
 

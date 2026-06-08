@@ -11,6 +11,8 @@ from typing import Dict, List
 import numpy as np
 from scipy.stats.qmc import LatinHypercube
 
+DEFAULT_NUM_SAMPLES = 200
+
 try:
     from .config import (
         MAX_OFFSET_MM,
@@ -145,7 +147,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-debug-fields", action="store_true")
 
     parser.add_argument("--param-list-json", type=Path, default=None)
-    parser.add_argument("--num-samples", type=int, default=200)
+    parser.add_argument("--num-samples", type=int, default=DEFAULT_NUM_SAMPLES)
     parser.add_argument("--min-offsets-json", type=Path, default=None)
     parser.add_argument("--max-offsets-json", type=Path, default=None)
     return parser.parse_args()

@@ -155,7 +155,11 @@ def offsets_dict_to_vector(offsets: Dict[str, float]) -> np.ndarray:
 
 
 def radial_stations_from_params(params: Dict[str, float]) -> np.ndarray:
-    """Return [r0, r1, r2, r3, r4, r5] from the required radial-threshold definition."""
+    """Return [r0, r1, r2, r3, r4, r5] from required radial-threshold geometry keys.
+
+    Required keys in `params` (all in mm): bore_radius_inner, bore_height,
+    lower_transition_height, web_height, upper_transition_height, rim_height.
+    """
     r0 = float(params["bore_radius_inner"])
     r1 = r0 + float(params["bore_height"])
     r2 = r1 + float(params["lower_transition_height"])
