@@ -1,4 +1,9 @@
-"""Lightweight physically-motivated stress/life surrogate."""
+"""Lightweight geometry-driven stress/life surrogate.
+
+Life intentionally uses explicit five-zone fatigue laws with a knee-based
+stress-life model plus deterministic geometry-coupled severity.  The zone laws
+represent engineering-zone allowables/knockdowns (not random materials).
+"""
 
 from __future__ import annotations
 
@@ -6,15 +11,20 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from .config import CYCLE_PHASE_WEIGHTS, CYCLE_SPEED_FACTORS, REGION_NAME_TO_ID
+from .config import CYCLE_PHASE_WEIGHTS, CYCLE_SPEED_FACTORS, NOMINAL_GEOMETRY_MM, REGION_NAME_TO_ID
 
 REGION_STRESS_SCALE = np.array([1.08, 1.00, 1.13], dtype=np.float64)
 # Region scaling by index: 0=bore, 1=web, 2=rim.
 
-# Zone-specific Basquin fatigue coefficients (5 zones: bore, lower_transition, web, upper_transition, rim).
-# Distinct values per zone are mandatory so the benchmark tests subregion-dependent life learning.
-ZONE_BASQUIN_C = np.array([1.8e12, 9.0e11, 7.2e11, 8.5e11, 4.5e12], dtype=np.float64)
-ZONE_BASQUIN_M = np.array([4.2, 4.6, 5.1, 4.8, 5.6], dtype=np.float64)
+# Piecewise log-log S-N parameters by zone:
+# index order = bore, lower_transition, web, upper_transition, rim.
+# These encode zone-specific design allowables/notch sensitivity/engineering
+# severity and are intentionally distinct to produce explicit life
+# discontinuities across zone thresholds.
+ZONE_KNEE_STRESS_MPA = np.array([65.0, 80.0, 106.0, 108.0, 104.0], dtype=np.float64)
+ZONE_KNEE_LIFE = np.array([3.0e4, 8.0e4, 1.8e5, 2.2e5, 1.5e5], dtype=np.float64)
+ZONE_SLOPE_HIGH = np.array([8.2, 9.2, 7.5, 8.3, 8.2], dtype=np.float64)
+ZONE_SLOPE_LOW = np.array([3.7, 4.1, 3.3, 3.7, 3.6], dtype=np.float64)
 
 MIN_THICKNESS_MM = 1e-3
 SIGMA_REF_MPA = 178.0
@@ -22,6 +32,26 @@ AMPLITUDE_HALF_RANGE = 0.5
 AMPLITUDE_SPEED_BASE = 0.85
 AMPLITUDE_SPEED_GAIN = 0.15
 EPS = 1e-6
+
+
+def _smooth_band_gate(r: np.ndarray, r_start: float, r_end: float, edge_fraction: float = 0.22) -> np.ndarray:
+    """Smoothly gate values to a radial band [r_start, r_end].
+
+    Parameters
+    ----------
+    r:
+        Radial coordinates.
+    r_start, r_end:
+        Start and end radial stations of the target band.
+    edge_fraction:
+        Fractional edge smoothing width relative to the band width.
+    """
+    width = max(r_end - r_start, 1e-9)
+    s = np.clip((r - r_start) / width, 0.0, 1.0)
+    edge = np.clip(edge_fraction, 0.08, 0.45)
+    gate_in = 1.0 / (1.0 + np.exp(-(s - edge) / max(0.25 * edge, 1e-3)))
+    gate_out = 1.0 / (1.0 + np.exp(-((1.0 - edge) - s) / max(0.25 * edge, 1e-3)))
+    return gate_in * gate_out
 
 
 def _geometry_section_thickness(
@@ -44,15 +74,9 @@ def _transition_concentration(
     params: Dict[str, float],
     radial_breaks: np.ndarray,
 ) -> np.ndarray:
-    """Stress concentration factor from transition bands, defined by radial position only.
-
-    Concentration is computed from the node's r-coordinate relative to the lower
-    [r1, r2] and upper [r3, r4] transition bands.  A Gaussian bell is centred on
-    each band; the peak amplitude is modulated by the inverse of the fillet radius.
-    This avoids the previous centerline-stripe artifact caused by distance to a
-    fixed 2-D landmark point.
-    """
+    """Stress concentration tied to transition radial bands and shoulder proximity."""
     r = nodes[:, 1]
+    x = nodes[:, 0]
     r1 = float(radial_breaks[1])
     r2 = float(radial_breaks[2])
     r3 = float(radial_breaks[3])
@@ -61,20 +85,27 @@ def _transition_concentration(
     lower_width = max(r2 - r1, 1e-6)
     upper_width = max(r4 - r3, 1e-6)
 
-    r_lower_mid = 0.5 * (r1 + r2)
-    r_upper_mid = 0.5 * (r3 + r4)
+    u_lower = np.clip((r - r1) / lower_width, 0.0, 1.0)
+    u_upper = np.clip((r - r3) / upper_width, 0.0, 1.0)
 
-    sigma_lower = max(0.4 * lower_width, 0.5)
-    sigma_upper = max(0.4 * upper_width, 0.5)
+    shoulder_lower = np.exp(-0.5 * ((u_lower - 0.12) / 0.18) ** 2) + np.exp(-0.5 * ((u_lower - 0.88) / 0.18) ** 2)
+    shoulder_upper = np.exp(-0.5 * ((u_upper - 0.12) / 0.18) ** 2) + np.exp(-0.5 * ((u_upper - 0.88) / 0.18) ** 2)
+
+    gate_lower = _smooth_band_gate(r, r1, r2)
+    gate_upper = _smooth_band_gate(r, r3, r4)
 
     r_lower = max(params["lower_fillet_radius"], 0.3)
     r_upper = max(params["upper_fillet_radius"], 0.3)
 
-    gain_lower = 0.55 * np.clip((2.8 / r_lower) ** 1.1, 0.35, 2.8)
-    gain_upper = 0.45 * np.clip((2.8 / r_upper) ** 1.1, 0.35, 2.8)
+    gain_lower = 0.40 * np.clip((2.8 / r_lower) ** 1.05, 0.30, 2.7)
+    gain_upper = 0.34 * np.clip((2.8 / r_upper) ** 1.05, 0.30, 2.7)
 
-    k_lower = 1.0 + gain_lower * np.exp(-0.5 * ((r - r_lower_mid) / sigma_lower) ** 2)
-    k_upper = 1.0 + gain_upper * np.exp(-0.5 * ((r - r_upper_mid) / sigma_upper) ** 2)
+    t_local = _geometry_section_thickness(nodes, params, radial_breaks)
+    surface_proximity = np.clip((2.0 * np.abs(x)) / np.maximum(t_local, MIN_THICKNESS_MM), 0.0, 1.0)
+    shoulder_surface = 0.60 + 0.40 * np.power(surface_proximity, 1.45)
+
+    k_lower = 1.0 + gain_lower * gate_lower * shoulder_lower * shoulder_surface
+    k_upper = 1.0 + gain_upper * gate_upper * shoulder_upper * shoulder_surface
     return k_lower * k_upper
 
 
@@ -88,6 +119,9 @@ def compute_phase_equivalent_stresses(
 ) -> np.ndarray:
     r = nodes[:, 1]
     r_inner = float(radial_breaks[0])
+    r1 = float(radial_breaks[1])
+    r2 = float(radial_breaks[2])
+    r3 = float(radial_breaks[3])
     r_outer = float(radial_breaks[5])
     span = max(r_outer - r_inner, EPS)
     r_norm = np.clip((r - r_inner) / span, 0.0, 1.0)
@@ -99,12 +133,38 @@ def compute_phase_equivalent_stresses(
     section_thickness = _geometry_section_thickness(nodes, geometry_params, radial_breaks)
     t_ref = np.median(section_thickness)
     thin_amp = np.power(np.clip(t_ref / section_thickness, 0.55, 1.95), 0.72)
+    surface_proximity = np.clip((2.0 * np.abs(nodes[:, 0])) / np.maximum(section_thickness, MIN_THICKNESS_MM), 0.0, 1.0)
 
     transition_conc = _transition_concentration(nodes, geometry_params, radial_breaks)
 
+    bore_width = max(r1 - r_inner, 1e-9)
+    u_bore = np.clip((r - r_inner) / bore_width, 0.0, 1.0)
+    bore_gate = _smooth_band_gate(r, r_inner, r1, edge_fraction=0.28)
+    bore_shoulder = np.exp(-0.5 * ((u_bore - 0.88) / 0.18) ** 2)
+    bore_slender = np.clip(
+        (geometry_params["bore_height"] / max(geometry_params["bore_thickness"], 1e-6))
+        / (NOMINAL_GEOMETRY_MM["bore_height"] / NOMINAL_GEOMETRY_MM["bore_thickness"]),
+        0.65,
+        2.0,
+    )
+    bore_radius_factor = np.clip(NOMINAL_GEOMETRY_MM["bore_radius_inner"] / max(geometry_params["bore_radius_inner"], 1e-6), 0.75, 1.35)
+    bore_conc = 1.0 + 2.40 * bore_gate * bore_shoulder * np.power(surface_proximity, 1.2) * (0.35 + 0.65 * bore_radius_factor) * max(0.0, bore_slender - 0.70)
+
+    web_width = max(r3 - r2, 1e-9)
+    u_web = np.clip((r - r2) / web_width, 0.0, 1.0)
+    web_mid = np.exp(-0.5 * ((u_web - 0.50) / 0.24) ** 2)
+    web_gate = _smooth_band_gate(r, r2, r3, edge_fraction=0.20)
+    web_slender = np.clip(
+        (geometry_params["web_height"] / max(geometry_params["web_thickness"], 1e-6))
+        / (NOMINAL_GEOMETRY_MM["web_height"] / NOMINAL_GEOMETRY_MM["web_thickness"]),
+        0.65,
+        2.2,
+    )
+    web_conc = 1.0 + 0.18 * web_gate * web_mid * np.power(surface_proximity, 1.1) * max(0.0, web_slender - 0.90)
+
     zone_multiplier = np.ones(nodes.shape[0], dtype=np.float64)
-    zone_multiplier[zone_ids == 1] *= 1.03  # lower_transition
-    zone_multiplier[zone_ids == 3] *= 1.03  # upper_transition
+    zone_multiplier[zone_ids == 1] *= 1.04  # lower_transition
+    zone_multiplier[zone_ids == 3] *= 1.04  # upper_transition
 
     geom_gain = 1.0 + 0.0012 * (
         geometry_params["rim_thickness"] + geometry_params["web_height"] + geometry_params["bore_radius_inner"]
@@ -115,6 +175,8 @@ def compute_phase_equivalent_stresses(
         * rotor_shape
         * thin_amp
         * transition_conc
+        * bore_conc
+        * web_conc
         * zone_multiplier
         * REGION_STRESS_SCALE[region_ids]
         * geom_gain
@@ -129,19 +191,116 @@ def compute_stress_max(phase_stress: np.ndarray) -> np.ndarray:
     return np.max(phase_stress, axis=1).astype(np.float64)
 
 
-def compute_life_raw(phase_stress: np.ndarray, zone_ids: np.ndarray) -> np.ndarray:
-    """Compute life using zone-specific Basquin fatigue parameters.
+def _piecewise_sn_life_per_phase(sigma_a: np.ndarray, zone_ids: np.ndarray) -> np.ndarray:
+    """Return per-phase cycles-to-failure from zone-specific knee-based S-N laws."""
+    sigma_knee = ZONE_KNEE_STRESS_MPA[zone_ids][:, None]
+    n_knee = ZONE_KNEE_LIFE[zone_ids][:, None]
+    m_high = ZONE_SLOPE_HIGH[zone_ids][:, None]
+    m_low = ZONE_SLOPE_LOW[zone_ids][:, None]
 
-    Life must be computed from zone_ids (5 zones), not region_ids (3 regions),
-    so that transition-zone fatigue behaviour is distinct from core web behaviour.
+    ratio = np.maximum(sigma_a, EPS) / np.maximum(sigma_knee, EPS)
+    high_branch = n_knee * np.power(np.maximum(ratio, EPS), -m_high)
+    low_branch = n_knee * np.power(np.maximum(ratio, EPS), -m_low)
+    return np.where(sigma_a >= sigma_knee, high_branch, low_branch)
+
+
+def _geometry_life_severity(
+    nodes: np.ndarray,
+    zone_ids: np.ndarray,
+    params: Dict[str, float],
+    radial_breaks: np.ndarray,
+) -> np.ndarray:
+    r = nodes[:, 1]
+    x = nodes[:, 0]
+    t_local = _geometry_section_thickness(nodes, params, radial_breaks)
+    t_nom = np.maximum(_geometry_section_thickness(nodes, NOMINAL_GEOMETRY_MM, radial_breaks), MIN_THICKNESS_MM)
+    t_ratio = np.clip(t_nom / t_local, 0.72, 1.95)
+
+    r_inner = float(radial_breaks[0])
+    r_outer = float(radial_breaks[5])
+    r_norm = np.clip((r - r_inner) / max(r_outer - r_inner, EPS), 0.0, 1.0)
+    radial_severity = np.power(r_norm, 1.25)
+
+    lower_gate = _smooth_band_gate(r, float(radial_breaks[1]), float(radial_breaks[2]))
+    upper_gate = _smooth_band_gate(r, float(radial_breaks[3]), float(radial_breaks[4]))
+    surface_proximity = np.clip((2.0 * np.abs(x)) / np.maximum(t_local, MIN_THICKNESS_MM), 0.0, 1.0)
+
+    lower_fillet_severity = np.clip(NOMINAL_GEOMETRY_MM["lower_fillet_radius"] / max(params["lower_fillet_radius"], 1e-6), 0.55, 2.1)
+    upper_fillet_severity = np.clip(NOMINAL_GEOMETRY_MM["upper_fillet_radius"] / max(params["upper_fillet_radius"], 1e-6), 0.55, 2.1)
+
+    bore_slender = np.clip(
+        (params["bore_height"] / max(params["bore_thickness"], 1e-6))
+        / (NOMINAL_GEOMETRY_MM["bore_height"] / NOMINAL_GEOMETRY_MM["bore_thickness"]),
+        0.65,
+        1.75,
+    )
+    web_slender = np.clip(
+        (params["web_height"] / max(params["web_thickness"], 1e-6))
+        / (NOMINAL_GEOMETRY_MM["web_height"] / NOMINAL_GEOMETRY_MM["web_thickness"]),
+        0.70,
+        1.80,
+    )
+    rim_slender = np.clip(
+        (params["rim_height"] / max(params["rim_thickness"], 1e-6))
+        / (NOMINAL_GEOMETRY_MM["rim_height"] / NOMINAL_GEOMETRY_MM["rim_thickness"]),
+        0.65,
+        2.00,
+    )
+
+    severity = np.ones(nodes.shape[0], dtype=np.float64)
+    severity *= np.power(t_ratio, 0.56)
+    severity *= 1.0 + 0.11 * radial_severity
+
+    mask_bore = zone_ids == 0
+    mask_lower = zone_ids == 1
+    mask_web = zone_ids == 2
+    mask_upper = zone_ids == 3
+    mask_rim = zone_ids == 4
+
+    severity[mask_bore] *= 1.0 + 0.68 * (bore_slender - 1.0) + 0.46 * (t_ratio[mask_bore] - 1.0)
+
+    severity[mask_lower] *= 1.0 + 0.34 * lower_gate[mask_lower] * (
+        0.55 + 0.45 * surface_proximity[mask_lower]
+    ) * (lower_fillet_severity - 0.85)
+
+    web_transition_tail = np.maximum(lower_gate, upper_gate)
+    severity[mask_web] *= 1.0 + 0.22 * (web_slender - 1.0) + 0.20 * (t_ratio[mask_web] - 1.0) + 0.08 * web_transition_tail[mask_web]
+
+    severity[mask_upper] *= 1.0 + 0.30 * upper_gate[mask_upper] * (
+        0.55 + 0.45 * surface_proximity[mask_upper]
+    ) * (upper_fillet_severity - 0.85)
+
+    rim_thin = np.clip(NOMINAL_GEOMETRY_MM["rim_thickness"] / max(params["rim_thickness"], 1e-6), 0.70, 1.95)
+    severity[mask_rim] *= 1.0 + 0.22 * (rim_slender - 1.0) + 0.34 * (rim_thin - 1.0) + 0.10 * radial_severity[mask_rim]
+
+    return np.clip(severity, 0.65, 2.85)
+
+
+def compute_life_raw(
+    phase_stress: np.ndarray,
+    zone_ids: np.ndarray,
+    nodes: np.ndarray,
+    geometry_params: Dict[str, float],
+    radial_breaks: np.ndarray,
+) -> np.ndarray:
+    """Compute life using deterministic zone-specific knee-based S-N laws.
+
+    Inputs:
+    - geometry-driven local stress (phase_stress)
+    - five-zone fatigue law (zone_ids)
+    - geometry-coupled deterministic local severity (nodes + geometry parameters)
     """
     sigma_eq = np.maximum(phase_stress, EPS)
     amplitude_scale = AMPLITUDE_HALF_RANGE * (AMPLITUDE_SPEED_BASE + AMPLITUDE_SPEED_GAIN * CYCLE_SPEED_FACTORS)
     sigma_a = sigma_eq * amplitude_scale[None, :]
-
-    basquin_c = ZONE_BASQUIN_C[zone_ids][:, None]
-    basquin_m = ZONE_BASQUIN_M[zone_ids][:, None]
-    n_fail = basquin_c * np.power(np.maximum(sigma_a, EPS), -basquin_m)
+    local_severity = _geometry_life_severity(
+        nodes=nodes,
+        zone_ids=zone_ids,
+        params=geometry_params,
+        radial_breaks=radial_breaks,
+    )
+    sigma_a_eff = sigma_a * local_severity[:, None]
+    n_fail = _piecewise_sn_life_per_phase(sigma_a_eff, zone_ids)
 
     damage_per_cycle = np.sum(CYCLE_PHASE_WEIGHTS[None, :] / np.maximum(n_fail, 1e-20), axis=1)
     return (1.0 / np.maximum(damage_per_cycle, 1e-20)).astype(np.float64)

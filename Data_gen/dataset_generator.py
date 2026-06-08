@@ -11,6 +11,8 @@ from typing import Dict, List
 import numpy as np
 from scipy.stats.qmc import LatinHypercube
 
+DEFAULT_NUM_SAMPLES = 200
+
 try:
     from .config import (
         MAX_OFFSET_MM,
@@ -138,14 +140,14 @@ def generate_dataset(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate dataset using explicit offsets or LHS.")
-    parser.add_argument("--output-h5", type=Path, required=True)
+    parser.add_argument("--output-h5", type=Path, default=Path("Data_gen/output/disc_dataset_edge.h5"))
     parser.add_argument("--representation", type=str, default="edge", choices=REPRESENTATIONS)
     parser.add_argument("--include-derivatives", action="store_true")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--include-debug-fields", action="store_true")
 
     parser.add_argument("--param-list-json", type=Path, default=None)
-    parser.add_argument("--num-samples", type=int, default=None)
+    parser.add_argument("--num-samples", type=int, default=DEFAULT_NUM_SAMPLES)
     parser.add_argument("--min-offsets-json", type=Path, default=None)
     parser.add_argument("--max-offsets-json", type=Path, default=None)
     return parser.parse_args()
@@ -165,8 +167,6 @@ def main() -> None:
             include_debug_fields=args.include_debug_fields,
         )
     else:
-        if args.num_samples is None:
-            raise ValueError("--num-samples is required in LHS mode")
         min_offsets = _load_offset_bounds(args.min_offsets_json, MIN_OFFSET_MM)
         max_offsets = _load_offset_bounds(args.max_offsets_json, MAX_OFFSET_MM)
         generate_dataset(

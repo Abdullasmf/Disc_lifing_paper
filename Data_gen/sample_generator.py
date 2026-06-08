@@ -30,8 +30,14 @@ def _compute_targets(
         radial_breaks=radial_breaks,
     )
     stress_max_vm = compute_stress_max(phase_stress)
-    # Life uses zone_ids (5-zone Basquin) so transition zones have distinct fatigue laws.
-    life_raw = compute_life_raw(phase_stress, zone_ids)
+    # Life uses 5-zone knee-based fatigue laws + deterministic geometry-coupled severity.
+    life_raw = compute_life_raw(
+        phase_stress=phase_stress,
+        zone_ids=zone_ids,
+        nodes=nodes,
+        geometry_params=geometry_params,
+        radial_breaks=radial_breaks,
+    )
     return phase_stress, stress_max_vm, life_raw
 
 
@@ -90,12 +96,14 @@ def generate_sample(
     )
 
     if representation == "edge":
-        edge_points, edge_arc, edge_zone, edge_region = resample_contour_uniform_arc_length(
+        edge_points, edge_arc = resample_contour_uniform_arc_length(
             points=contour.points,
             arc_length_mm=contour.arc_length_mm,
-            zone_ids=contour_zone_id,
-            region_ids=contour_region_id,
             n_samples=contour.points.shape[0],
+        )
+        edge_zone, edge_region = assign_zone_and_region_from_radius(
+            nodes=edge_points,
+            radial_breaks=radial_breaks,
         )
 
         edge_phase_stress, edge_stress_max_vm, edge_life_raw = _compute_targets(

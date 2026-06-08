@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
+from .config import REGION_NAME_TO_ID, ZONE_NAME_TO_ID, ZONE_TO_REGION, radial_stations_from_params
 
 
 @dataclass
@@ -180,13 +180,8 @@ def build_disc_contour(params: Dict[str, float], points_per_side: int = 220) -> 
     """Build required bore/lower-transition/web/upper-transition/rim contour."""
     validate_geometry_parameters(params)
 
-    r0 = params["bore_radius_inner"]
-    r1 = r0 + params["bore_height"]
-    r2 = r1 + params["lower_transition_height"]
-    r3 = r2 + params["web_height"]
-    r4 = r3 + params["upper_transition_height"]
-    r5 = r4 + params["rim_height"]
-    radial_breaks = np.array([r0, r1, r2, r3, r4, r5], dtype=np.float64)
+    radial_breaks = radial_stations_from_params(params)
+    r0, r1, r2, r3, r4, r5 = [float(v) for v in radial_breaks]
 
     front_r = np.linspace(r0, r5, points_per_side, endpoint=False)
     rear_r = np.linspace(r5, r0, points_per_side, endpoint=False)

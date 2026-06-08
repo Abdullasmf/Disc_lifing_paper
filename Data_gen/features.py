@@ -20,10 +20,8 @@ def _circular_smooth(values: np.ndarray, window: int = 5) -> np.ndarray:
 def resample_contour_uniform_arc_length(
     points: np.ndarray,
     arc_length_mm: np.ndarray,
-    zone_ids: np.ndarray,
-    region_ids: np.ndarray,
     n_samples: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray]:
     closing_gap = float(np.linalg.norm(points[0] - points[-1]))
     total_arc = float(arc_length_mm[-1]) + closing_gap
 
@@ -35,20 +33,9 @@ def resample_contour_uniform_arc_length(
     r_new = np.interp(s_new, s_ext, pts_ext[:, 1])
     new_points = np.column_stack([x_new, r_new])
 
-    idx_r = np.searchsorted(arc_length_mm, s_new, side="right") % points.shape[0]
-    idx_l = (idx_r - 1) % points.shape[0]
-
-    def _cyc_dist(q: np.ndarray, ref_idx: np.ndarray) -> np.ndarray:
-        d = np.abs(q - arc_length_mm[ref_idx])
-        return np.minimum(d, total_arc - d)
-
-    nearest = np.where(_cyc_dist(s_new, idx_l) <= _cyc_dist(s_new, idx_r), idx_l, idx_r)
-
     return (
         new_points.astype(np.float64),
         s_new.astype(np.float64),
-        zone_ids[nearest].astype(np.int32),
-        region_ids[nearest].astype(np.int32),
     )
 
 
