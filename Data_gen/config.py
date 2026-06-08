@@ -152,3 +152,14 @@ def offset_vector_to_dict(vector: np.ndarray) -> Dict[str, float]:
 
 def offsets_dict_to_vector(offsets: Dict[str, float]) -> np.ndarray:
     return np.array([float(offsets.get(k, 0.0)) for k in PUBLIC_GEOMETRY_PARAMETERS], dtype=np.float64)
+
+
+def radial_stations_from_params(params: Dict[str, float]) -> np.ndarray:
+    """Return [r0, r1, r2, r3, r4, r5] from the required radial-threshold definition."""
+    r0 = float(params["bore_radius_inner"])
+    r1 = r0 + float(params["bore_height"])
+    r2 = r1 + float(params["lower_transition_height"])
+    r3 = r2 + float(params["web_height"])
+    r4 = r3 + float(params["upper_transition_height"])
+    r5 = r4 + float(params["rim_height"])
+    return np.array([r0, r1, r2, r3, r4, r5], dtype=np.float64)

@@ -16,6 +16,7 @@ from .config import (
     MIN_OFFSET_MM,
     NOMINAL_GEOMETRY_MM,
     REGION_NAME_TO_ID,
+    ZONE_TO_REGION,
     ZONE_NAME_TO_ID,
 )
 
@@ -34,7 +35,9 @@ def create_dataset_file(
     h5f = h5py.File(output_h5_path, "w")
 
     h5f.attrs["generator_name"] = "synthetic_axisymmetric_disc_two_layer"
-    h5f.attrs["generator_version"] = "3.0"
+    h5f.attrs["generator_version"] = "3.1"
+    h5f.attrs["generator/name"] = "synthetic_axisymmetric_disc_two_layer"
+    h5f.attrs["generator/version"] = "3.1"
     h5f.attrs["representation"] = representation
     h5f.attrs["include_derivatives"] = bool(include_derivatives)
     h5f.attrs["units"] = "mm"
@@ -54,6 +57,10 @@ def create_dataset_file(
     h5f.create_dataset(
         "region_name_to_id_mapping",
         data=np.array([f"{k}:{v}" for k, v in REGION_NAME_TO_ID.items()], dtype="S64"),
+    )
+    h5f.create_dataset(
+        "zone_to_region_mapping",
+        data=np.array([f"{k}:{ZONE_TO_REGION[k]}" for k in ZONE_NAME_TO_ID.keys()], dtype="S64"),
     )
 
     h5f.create_group("samples")

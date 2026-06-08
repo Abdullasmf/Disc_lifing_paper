@@ -32,6 +32,28 @@ def _unique_rows(points: np.ndarray) -> np.ndarray:
     return uniq[np.argsort(idx)]
 
 
+def _build_surface_interpolants(contour_points: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    front = contour_points[contour_points[:, 0] <= 0.0]
+    rear = contour_points[contour_points[:, 0] >= 0.0]
+
+    r_front = front[:, 1]
+    r_rear = rear[:, 1]
+    x_front = front[:, 0]
+    x_rear = rear[:, 0]
+
+    idx_f = np.argsort(r_front)
+    idx_r = np.argsort(r_rear)
+    r_front_sorted = r_front[idx_f]
+    r_rear_sorted = r_rear[idx_r]
+    x_front_sorted = x_front[idx_f]
+    x_rear_sorted = x_rear[idx_r]
+
+    r_unique = np.unique(np.concatenate([r_front_sorted, r_rear_sorted]))
+    xf = np.interp(r_unique, r_front_sorted, x_front_sorted)
+    xr = np.interp(r_unique, r_rear_sorted, x_rear_sorted)
+    return r_unique, xf, xr
+
+
 def generate_mesh(
     contour_points: np.ndarray,
     grid_x: int,
@@ -65,9 +87,11 @@ def generate_mesh(
     interior = candidates[poly.contains_points(candidates)]
     interior_list = [interior]
 
-    # Targeted refinement in transition bands – denser sampling near high-gradient regions.
+    # Targeted refinement in transition bands – denser sampling near shoulder regions.
     if radial_breaks is not None and len(radial_breaks) >= 5:
+        r_interp, x_front_interp, x_rear_interp = _build_surface_interpolants(contour_points)
         n_extra = max(grid_x * 3, 60)
+        n_surface_extra = max(grid_x * 2, 50)
         for r_start, r_end in [
             (float(radial_breaks[1]), float(radial_breaks[2])),
             (float(radial_breaks[3]), float(radial_breaks[4])),
@@ -78,6 +102,23 @@ def generate_mesh(
             extra_inside = extra_cands[poly.contains_points(extra_cands)]
             if extra_inside.shape[0] > 0:
                 interior_list.append(extra_inside)
+
+            # Optional shoulder-focused refinement near outer surfaces inside transition bands.
+            er_surf = rng.uniform(r_start, r_end, n_surface_extra)
+            x_front = np.interp(er_surf, r_interp, x_front_interp)
+            x_rear = np.interp(er_surf, r_interp, x_rear_interp)
+            thickness = np.maximum(x_rear - x_front, 1e-9)
+            side = rng.integers(0, 2, size=n_surface_extra)
+            frac = rng.beta(0.7, 5.0, size=n_surface_extra)
+            ex_surf = np.where(
+                side == 0,
+                x_front + frac * thickness,
+                x_rear - frac * thickness,
+            )
+            shoulder_cands = np.column_stack([ex_surf, er_surf])
+            shoulder_inside = shoulder_cands[poly.contains_points(shoulder_cands)]
+            if shoulder_inside.shape[0] > 0:
+                interior_list.append(shoulder_inside)
 
     combined = np.vstack(interior_list)
     points = _unique_rows(np.vstack([contour_points, combined]))

@@ -12,13 +12,13 @@ import matplotlib.tri as mtri
 import numpy as np
 
 try:
-    from .config import CYCLE_PHASES, NOMINAL_GEOMETRY_MM
+    from .config import CYCLE_PHASES, NOMINAL_GEOMETRY_MM, radial_stations_from_params
     from .sample_generator import generate_sample
 except ImportError:
     repo_root = Path(__file__).resolve().parents[1]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from Data_gen.config import CYCLE_PHASES, NOMINAL_GEOMETRY_MM
+    from Data_gen.config import CYCLE_PHASES, NOMINAL_GEOMETRY_MM, radial_stations_from_params
     from Data_gen.sample_generator import generate_sample
 
 
@@ -65,15 +65,7 @@ def create_example_plot(
 
     # Radial breaks from the full sample's actual geometry parameters.
     params = full["geometry_parameters_actual"]
-    r0 = params["bore_radius_inner"]
-    rb = np.array([
-        r0,
-        r0 + params["bore_height"],
-        r0 + params["bore_height"] + params["lower_transition_height"],
-        r0 + params["bore_height"] + params["lower_transition_height"] + params["web_height"],
-        r0 + params["bore_height"] + params["lower_transition_height"] + params["web_height"] + params["upper_transition_height"],
-        r0 + params["bore_height"] + params["lower_transition_height"] + params["web_height"] + params["upper_transition_height"] + params["rim_height"],
-    ])
+    rb = radial_stations_from_params(params)
 
     fig, axes = plt.subplots(2, 3, figsize=(16, 9))
     ax = axes.ravel()
@@ -107,9 +99,10 @@ def create_example_plot(
     ax[2].set_xlabel("x [mm]"); ax[2].set_ylabel("r [mm]")
     fig.colorbar(tc2, ax=ax[2], fraction=0.046)
 
-    tc3 = ax[3].tripcolor(triang, full["life_raw"], cmap="viridis", shading="gouraud")
+    life_log10 = np.log10(np.maximum(full["life_raw"], 1e-30))
+    tc3 = ax[3].tripcolor(triang, life_log10, cmap="viridis", shading="gouraud")
     _add_radial_threshold_lines(ax[3], rb)
-    ax[3].set_title("life_raw (zone-specific Basquin)")
+    ax[3].set_title("log10(life_raw) [log scale]")
     ax[3].set_aspect("equal", adjustable="box")
     ax[3].set_xlabel("x [mm]"); ax[3].set_ylabel("r [mm]")
     fig.colorbar(tc3, ax=ax[3], fraction=0.046)
@@ -143,29 +136,19 @@ def create_example_plot(
 
 def _print_validation(param_offsets: dict[str, float]) -> None:
     """Print required validation checks to stdout."""
-    from .sample_generator import generate_sample as _gs
-    from .config import NOMINAL_GEOMETRY_MM as _NOM
-
     print("\n=== Validation report ===")
 
     # 1. Nominal geometry ordering
-    bt = _NOM["bore_thickness"]
-    rt = _NOM["rim_thickness"]
-    wt = _NOM["web_thickness"]
+    bt = NOMINAL_GEOMETRY_MM["bore_thickness"]
+    rt = NOMINAL_GEOMETRY_MM["rim_thickness"]
+    wt = NOMINAL_GEOMETRY_MM["web_thickness"]
     ok_order = bt > rt > wt
     print(f"[{'PASS' if ok_order else 'FAIL'}] Nominal bore_thickness({bt}) > rim_thickness({rt}) > web_thickness({wt})")
 
     # 2. Generate a sample with zero offsets and inspect it.
-    s_full = _gs(param_offsets={}, representation="full", seed=0, include_debug_fields=True)
+    s_full = generate_sample(param_offsets={}, representation="full", seed=0, include_debug_fields=True)
     params = s_full["geometry_parameters_actual"]
-    rb_arr = [
-        params["bore_radius_inner"],
-        params["bore_radius_inner"] + params["bore_height"],
-        params["bore_radius_inner"] + params["bore_height"] + params["lower_transition_height"],
-        params["bore_radius_inner"] + params["bore_height"] + params["lower_transition_height"] + params["web_height"],
-        params["bore_radius_inner"] + params["bore_height"] + params["lower_transition_height"] + params["web_height"] + params["upper_transition_height"],
-        params["bore_radius_inner"] + params["bore_height"] + params["lower_transition_height"] + params["web_height"] + params["upper_transition_height"] + params["rim_height"],
-    ]
+    rb_arr = radial_stations_from_params(params)
     r1, r2, r3, r4 = rb_arr[1], rb_arr[2], rb_arr[3], rb_arr[4]
 
     # 3. Zone boundaries are threshold-based (verify nodes in transition bands have correct zone).
