@@ -7,7 +7,13 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from .config import REGION_NAME_TO_ID, ZONE_NAME_TO_ID, ZONE_TO_REGION, radial_stations_from_params
+from .config import (
+    REGION_NAME_TO_ID,
+    THICKNESS_ORDERING_GAP_MM,
+    ZONE_NAME_TO_ID,
+    ZONE_TO_REGION,
+    radial_stations_from_params,
+)
 
 
 @dataclass
@@ -133,9 +139,8 @@ def sanitize_geometry_parameters(params: Dict[str, float]) -> Dict[str, float]:
 
     # Mandatory section-thickness ordering for every generated sample.
     # The benchmark semantics require bore > rim > web, not only in nominal.
-    ordering_gap = 0.5
-    out["rim_thickness"] = max(out["rim_thickness"], out["web_thickness"] + ordering_gap)
-    out["bore_thickness"] = max(out["bore_thickness"], out["rim_thickness"] + ordering_gap)
+    out["rim_thickness"] = max(out["rim_thickness"], out["web_thickness"] + THICKNESS_ORDERING_GAP_MM)
+    out["bore_thickness"] = max(out["bore_thickness"], out["rim_thickness"] + THICKNESS_ORDERING_GAP_MM)
 
     lower_dt = abs(out["bore_thickness"] - out["web_thickness"])
     upper_dt = abs(out["rim_thickness"] - out["web_thickness"])

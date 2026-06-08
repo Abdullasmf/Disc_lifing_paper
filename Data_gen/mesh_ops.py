@@ -56,7 +56,11 @@ def _build_surface_interpolants(contour_points: np.ndarray) -> Tuple[np.ndarray,
 
 
 def _deterministic_jitter(index: np.ndarray, seed: int) -> np.ndarray:
-    """Return deterministic pseudo-random values in [-1, 1] from index and seed."""
+    """Return deterministic pseudo-random values in [-1, 1] from index and seed.
+
+    Uses a sine-hash style mapping (non-cryptographic) to provide stable,
+    reproducible mesh jitter without relying on runtime RNG state.
+    """
     phase = np.sin((index + 1.0) * 12.9898 + (float(seed) + 1.0) * 78.233) * 43758.5453123
     frac = phase - np.floor(phase)
     return 2.0 * frac - 1.0

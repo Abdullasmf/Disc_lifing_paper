@@ -84,6 +84,7 @@ MAX_OFFSET_MM: Dict[str, float] = {
 }
 
 REPRESENTATIONS = ("edge", "edge_proximity", "full")
+THICKNESS_ORDERING_GAP_MM = 0.5
 
 CYCLE_PHASES = (
     "taxi",
