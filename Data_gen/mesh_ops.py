@@ -61,6 +61,7 @@ def _deterministic_jitter(index: np.ndarray, seed: int) -> np.ndarray:
     Uses a sine-hash style mapping (non-cryptographic) to provide stable,
     reproducible mesh jitter without relying on runtime RNG state.
     """
+    # Constants are commonly used sine-hash values from graphics/noise practice.
     phase = np.sin((index + 1.0) * 12.9898 + (float(seed) + 1.0) * 78.233) * 43758.5453123
     frac = phase - np.floor(phase)
     return 2.0 * frac - 1.0

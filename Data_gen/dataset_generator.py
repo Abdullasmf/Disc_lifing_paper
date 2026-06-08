@@ -125,8 +125,8 @@ def generate_dataset(
     try:
         for sample_id, offsets in enumerate(offsets_list):
             # Deterministic per-sample seed without hidden random-process modifiers.
-            # Uses large coprime-style multipliers and an offset to spread seeds
-            # across the 31-bit range while remaining reproducible.
+            # Uses large coprimes and an offset (1_000_003, 7_919, 97) to spread
+            # seeds across the 31-bit range while remaining reproducible.
             sample_seed = int((int(seed) * 1_000_003 + sample_id * 7_919 + 97) % (2**31 - 1))
             sample = generate_sample(
                 param_offsets=offsets,

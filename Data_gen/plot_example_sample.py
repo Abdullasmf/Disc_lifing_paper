@@ -23,7 +23,7 @@ except ImportError:
 
 
 CURVATURE_FEATURE_INDEX = 2  # node_features order: tangent_x, tangent_r, curvature, curvature_gradient
-LIFE_DISCONTINUITY_LOG10_THRESHOLD = 0.08
+MIN_LIFE_DISCONTINUITY_LOG10_RATIO = 0.08
 
 
 def _load_offsets(json_path: Path | None) -> dict[str, float]:
@@ -180,8 +180,8 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         ratio_lt_web = zone_medians[1] / max(zone_medians[2], 1e-20)
         ratio_ut_web = zone_medians[3] / max(zone_medians[2], 1e-20)
         discontinuity_ok = (
-            abs(np.log10(ratio_lt_web)) > LIFE_DISCONTINUITY_LOG10_THRESHOLD
-            and abs(np.log10(ratio_ut_web)) > LIFE_DISCONTINUITY_LOG10_THRESHOLD
+            abs(np.log10(ratio_lt_web)) > MIN_LIFE_DISCONTINUITY_LOG10_RATIO
+            and abs(np.log10(ratio_ut_web)) > MIN_LIFE_DISCONTINUITY_LOG10_RATIO
         )
 
         stress = s_full["stress_max_vm"]

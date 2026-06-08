@@ -141,6 +141,7 @@ def sanitize_geometry_parameters(params: Dict[str, float]) -> Dict[str, float]:
     # The benchmark semantics require bore > rim > web, not only in nominal.
     out["rim_thickness"] = max(out["rim_thickness"], out["web_thickness"] + THICKNESS_ORDERING_GAP_MM)
     out["bore_thickness"] = max(out["bore_thickness"], out["rim_thickness"] + THICKNESS_ORDERING_GAP_MM)
+    # Keep this ordering block after all thickness edits so bore > rim > web is preserved.
 
     lower_dt = abs(out["bore_thickness"] - out["web_thickness"])
     upper_dt = abs(out["rim_thickness"] - out["web_thickness"])
