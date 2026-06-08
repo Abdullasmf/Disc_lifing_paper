@@ -60,14 +60,15 @@ def contour_derivative_features(contour_points: np.ndarray, arc_length_mm: np.nd
     tangent = d1 / speed[:, None]
 
     d2 = 2.0 * ((p_next - contour_points) / ds_next[:, None] - (contour_points - p_prev) / ds_prev[:, None])
-    curvature = np.abs(d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]) / np.maximum(speed**3, 1e-12)
+    curvature_raw = np.abs(d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]) / np.maximum(speed**3, 1e-12)
+    curvature = _circular_smooth(curvature_raw, window=5)
 
     ds_total = 0.5 * (ds_prev + ds_next)
     curvature_grad = (np.roll(curvature, -1) - np.roll(curvature, 1)) / np.maximum(2.0 * ds_total, 1e-9)
 
     return {
         "tangent": tangent.astype(np.float64),
-        "curvature": _circular_smooth(curvature, window=5).astype(np.float64),
+        "curvature": curvature.astype(np.float64),
         "curvature_gradient": _circular_smooth(curvature_grad, window=5).astype(np.float64),
     }
 

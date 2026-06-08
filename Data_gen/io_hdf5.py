@@ -35,9 +35,9 @@ def create_dataset_file(
     h5f = h5py.File(output_h5_path, "w")
 
     h5f.attrs["generator_name"] = "synthetic_axisymmetric_disc_two_layer"
-    h5f.attrs["generator_version"] = "3.1"
+    h5f.attrs["generator_version"] = "3.2"
     h5f.attrs["generator/name"] = "synthetic_axisymmetric_disc_two_layer"
-    h5f.attrs["generator/version"] = "3.1"
+    h5f.attrs["generator/version"] = "3.2"
     h5f.attrs["representation"] = representation
     h5f.attrs["include_derivatives"] = bool(include_derivatives)
     h5f.attrs["units"] = "mm"
@@ -95,6 +95,7 @@ def write_sample_group(h5f: h5py.File, sample_id: int, sample_seed: int, sample:
         "contour_region_id",
         "contour_arc_length_mm",
         "zone_names",
+        "radial_breaks_mm",
     ]
 
     if "arc_length_mm" in sample:

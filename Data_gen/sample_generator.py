@@ -144,6 +144,7 @@ def generate_sample(
             "node_features": node_features,
             "node_feature_names": node_feature_names,
             "arc_length_mm": edge_arc,
+            "radial_breaks_mm": radial_breaks.astype(np.float64),
         }
     elif representation == "edge_proximity":
         keep = (distance_to_contour <= cfg.edge_proximity_distance_mm) & (distance_to_contour > EDGE_DUPLICATE_EPS_MM)
@@ -180,6 +181,7 @@ def generate_sample(
             "node_features": node_features,
             "node_feature_names": node_feature_names,
             "arc_length_mm": arc,
+            "radial_breaks_mm": radial_breaks.astype(np.float64),
         }
     else:
         node_features, node_feature_names = empty_features(mesh.nodes.shape[0])
@@ -195,6 +197,7 @@ def generate_sample(
             "phase_stress_eq": mesh_phase_stress,
             "node_features": node_features,
             "node_feature_names": node_feature_names,
+            "radial_breaks_mm": radial_breaks.astype(np.float64),
         }
         if include_debug_fields:
             out["distance_to_contour_mm"] = distance_to_contour.astype(np.float64)

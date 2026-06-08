@@ -145,63 +145,76 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
     ok_order = bt > rt > wt
     print(f"[{'PASS' if ok_order else 'FAIL'}] Nominal bore_thickness({bt}) > rim_thickness({rt}) > web_thickness({wt})")
 
-    # 2. Generate a sample with zero offsets and inspect it.
-    s_full = generate_sample(param_offsets={}, representation="full", seed=0, include_debug_fields=True)
-    params = s_full["geometry_parameters_actual"]
-    rb_arr = radial_stations_from_params(params)
-    r1, r2, r3, r4 = rb_arr[1], rb_arr[2], rb_arr[3], rb_arr[4]
+    def _validate_one(label: str, offsets: dict[str, float], seed: int) -> None:
+        s_full = generate_sample(param_offsets=offsets, representation="full", seed=seed, include_debug_fields=True)
+        params = s_full["geometry_parameters_actual"]
+        rb_arr = radial_stations_from_params(params)
+        r1, r2, r3, r4 = rb_arr[1], rb_arr[2], rb_arr[3], rb_arr[4]
 
-    # 3. Zone boundaries are threshold-based (verify nodes in transition bands have correct zone).
-    nodes = s_full["node_coords_mm"]
-    zone_ids = s_full["zone_id"]
-    r_nodes = nodes[:, 1]
-    in_lower_band = (r_nodes > r1) & (r_nodes <= r2)
-    in_upper_band = (r_nodes > r3) & (r_nodes <= r4)
-    lower_correct = np.all(zone_ids[in_lower_band] == 1) if np.any(in_lower_band) else True
-    upper_correct = np.all(zone_ids[in_upper_band] == 3) if np.any(in_upper_band) else True
-    print(f"[{'PASS' if lower_correct else 'FAIL'}] Lower transition nodes have zone_id==1 (threshold-based)")
-    print(f"[{'PASS' if upper_correct else 'FAIL'}] Upper transition nodes have zone_id==3 (threshold-based)")
+        nodes = s_full["node_coords_mm"]
+        zone_ids = s_full["zone_id"]
+        r_nodes = nodes[:, 1]
+        in_lower_band = (r_nodes > r1) & (r_nodes <= r2)
+        in_upper_band = (r_nodes > r3) & (r_nodes <= r4)
+        lower_correct = np.all(zone_ids[in_lower_band] == 1) if np.any(in_lower_band) else True
+        upper_correct = np.all(zone_ids[in_upper_band] == 3) if np.any(in_upper_band) else True
 
-    # 4. Thickness computed correctly (bore > rim).
-    t_bore_actual = params["bore_thickness"]
-    t_rim_actual = params["rim_thickness"]
-    print(f"[{'PASS' if t_bore_actual > t_rim_actual else 'FAIL'}] Actual bore_thickness({t_bore_actual:.2f}) > rim_thickness({t_rim_actual:.2f})")
+        t_bore = params["bore_thickness"]
+        t_rim = params["rim_thickness"]
+        t_web = params["web_thickness"]
+        order_ok = t_bore > t_rim > t_web
 
-    # 5. Mesh denser near transition bands.
-    lower_pts = int(np.sum(in_lower_band))
-    upper_pts = int(np.sum(in_upper_band))
-    total_interior = int(nodes.shape[0])
-    lower_fraction = lower_pts / total_interior
-    upper_fraction = upper_pts / total_interior
-    lower_band_frac = (r2 - r1) / (rb_arr[5] - rb_arr[0])
-    upper_band_frac = (r4 - r3) / (rb_arr[5] - rb_arr[0])
-    lower_denser = lower_fraction > lower_band_frac
-    upper_denser = upper_fraction > upper_band_frac
-    print(f"[{'PASS' if lower_denser else 'FAIL'}] Mesh denser in lower transition: {lower_fraction:.3f} vs band fraction {lower_band_frac:.3f}")
-    print(f"[{'PASS' if upper_denser else 'FAIL'}] Mesh denser in upper transition: {upper_fraction:.3f} vs band fraction {upper_band_frac:.3f}")
+        lower_pts = int(np.sum(in_lower_band))
+        upper_pts = int(np.sum(in_upper_band))
+        total_nodes = int(nodes.shape[0])
+        lower_fraction = lower_pts / max(total_nodes, 1)
+        upper_fraction = upper_pts / max(total_nodes, 1)
+        lower_band_frac = (r2 - r1) / max((rb_arr[5] - rb_arr[0]), 1e-12)
+        upper_band_frac = (r4 - r3) / max((rb_arr[5] - rb_arr[0]), 1e-12)
+        lower_denser = lower_fraction > lower_band_frac
+        upper_denser = upper_fraction > upper_band_frac
 
-    # 6. Transition zones have distinct life values.
-    life = s_full["life_raw"]
-    life_bore = np.median(life[zone_ids == 0])
-    life_lt = np.median(life[zone_ids == 1])
-    life_web = np.median(life[zone_ids == 2])
-    life_ut = np.median(life[zone_ids == 3])
-    life_rim = np.median(life[zone_ids == 4])
-    all_distinct = len({round(x, -3) for x in [life_bore, life_lt, life_web, life_ut, life_rim]}) >= 3
-    print(f"[{'PASS' if all_distinct else 'FAIL'}] Life distinct across 5 zones: bore={life_bore:.2e} lt={life_lt:.2e} web={life_web:.2e} ut={life_ut:.2e} rim={life_rim:.2e}")
+        life = s_full["life_raw"]
+        zone_medians = np.array([np.median(life[zone_ids == zid]) for zid in range(5)], dtype=np.float64)
+        ratio_lt_web = zone_medians[1] / max(zone_medians[2], 1e-20)
+        ratio_ut_web = zone_medians[3] / max(zone_medians[2], 1e-20)
+        discontinuity_ok = (abs(np.log10(ratio_lt_web)) > 0.08) and (abs(np.log10(ratio_ut_web)) > 0.08)
 
-    # 7. Stress hotspots in transition band not at x=0 centerline stripe.
-    stress = s_full["stress_max_vm"]
-    x_nodes = nodes[:, 0]
-    near_x0 = np.abs(x_nodes) < 0.5  # nodes within 0.5mm of x=0
-    near_x0_in_web = near_x0 & (zone_ids == 2)
-    if np.any(near_x0_in_web):
-        max_stress_center_web = float(np.max(stress[near_x0_in_web]))
+        stress = s_full["stress_max_vm"]
+        x_nodes = nodes[:, 0]
+        near_x0 = np.abs(x_nodes) < 0.5
+        near_x0_in_web = near_x0 & (zone_ids == 2)
+        max_stress_center_web = float(np.max(stress[near_x0_in_web])) if np.any(near_x0_in_web) else np.nan
         max_stress_transition = float(np.max(stress[(zone_ids == 1) | (zone_ids == 3)]))
-        no_stripe = max_stress_center_web < max_stress_transition
-        print(f"[{'PASS' if no_stripe else 'WARN'}] No centerline stress stripe: web-center max={max_stress_center_web:.1f} < transition max={max_stress_transition:.1f}")
-    else:
-        print("[SKIP] Not enough nodes near x=0 to check centerline stripe")
+        no_stripe = (max_stress_center_web < max_stress_transition) if np.isfinite(max_stress_center_web) else True
+
+        print(f"\n-- {label} sample --")
+        print(f"[{'PASS' if order_ok else 'FAIL'}] Thickness order bore({t_bore:.2f}) > rim({t_rim:.2f}) > web({t_web:.2f})")
+        print(f"[{'PASS' if lower_correct else 'FAIL'}] Lower transition threshold assignment zone_id==1")
+        print(f"[{'PASS' if upper_correct else 'FAIL'}] Upper transition threshold assignment zone_id==3")
+        print(f"[{'PASS' if lower_denser else 'FAIL'}] Lower transition mesh density {lower_fraction:.3f} > band fraction {lower_band_frac:.3f}")
+        print(f"[{'PASS' if upper_denser else 'FAIL'}] Upper transition mesh density {upper_fraction:.3f} > band fraction {upper_band_frac:.3f}")
+        print(f"[{'PASS' if discontinuity_ok else 'WARN'}] Life threshold discontinuity ratios: LT/web={ratio_lt_web:.3f}, UT/web={ratio_ut_web:.3f}")
+        if np.isfinite(max_stress_center_web):
+            print(f"[{'PASS' if no_stripe else 'WARN'}] Transition hotspot > web centerline stress: {max_stress_transition:.1f} > {max_stress_center_web:.1f}")
+        else:
+            print("[SKIP] Not enough web-center nodes for centerline check")
+
+    default_offset = {
+        "bore_radius_inner": -2.0,
+        "bore_height": 1.0,
+        "bore_thickness": -1.2,
+        "lower_transition_height": 0.8,
+        "web_height": 3.0,
+        "web_thickness": -0.7,
+        "upper_transition_height": -0.9,
+        "rim_height": 1.4,
+        "rim_thickness": -0.9,
+        "lower_fillet_radius": -0.6,
+        "upper_fillet_radius": 0.4,
+    }
+    _validate_one("Nominal", {}, seed=0)
+    _validate_one("Offset", param_offsets if param_offsets else default_offset, seed=13)
 
     print("=== End validation ===\n")
 

@@ -13,7 +13,7 @@ import numpy as np
 
 from .config import CYCLE_PHASE_WEIGHTS, CYCLE_SPEED_FACTORS, NOMINAL_GEOMETRY_MM, REGION_NAME_TO_ID
 
-REGION_STRESS_SCALE = np.array([1.08, 1.00, 1.13], dtype=np.float64)
+REGION_STRESS_SCALE = np.array([1.10, 1.00, 1.07], dtype=np.float64)
 # Region scaling by index: 0=bore, 1=web, 2=rim.
 
 # Piecewise log-log S-N parameters by zone:
@@ -21,10 +21,10 @@ REGION_STRESS_SCALE = np.array([1.08, 1.00, 1.13], dtype=np.float64)
 # These encode zone-specific design allowables/notch sensitivity/engineering
 # severity and are intentionally distinct to produce explicit life
 # discontinuities across zone thresholds.
-ZONE_KNEE_STRESS_MPA = np.array([65.0, 80.0, 106.0, 108.0, 104.0], dtype=np.float64)
-ZONE_KNEE_LIFE = np.array([3.0e4, 8.0e4, 1.8e5, 2.2e5, 1.5e5], dtype=np.float64)
-ZONE_SLOPE_HIGH = np.array([8.2, 9.2, 7.5, 8.3, 8.2], dtype=np.float64)
-ZONE_SLOPE_LOW = np.array([3.7, 4.1, 3.3, 3.7, 3.6], dtype=np.float64)
+ZONE_KNEE_STRESS_MPA = np.array([60.0, 77.0, 104.0, 107.0, 108.0], dtype=np.float64)
+ZONE_KNEE_LIFE = np.array([2.0e4, 6.5e4, 1.5e5, 2.1e5, 2.0e5], dtype=np.float64)
+ZONE_SLOPE_HIGH = np.array([9.1, 9.2, 7.6, 8.4, 7.8], dtype=np.float64)
+ZONE_SLOPE_LOW = np.array([4.0, 4.1, 3.3, 3.7, 3.4], dtype=np.float64)
 
 MIN_THICKNESS_MM = 1e-3
 SIGMA_REF_MPA = 178.0

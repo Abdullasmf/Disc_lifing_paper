@@ -131,7 +131,11 @@ def sanitize_geometry_parameters(params: Dict[str, float]) -> Dict[str, float]:
     ]:
         out[key] = max(out[key], 1e-3)
 
-    out["rim_thickness"] = max(out["rim_thickness"], 0.65 * out["web_thickness"])
+    # Mandatory section-thickness ordering for every generated sample.
+    # The benchmark semantics require bore > rim > web, not only in nominal.
+    ordering_gap = 0.5
+    out["rim_thickness"] = max(out["rim_thickness"], out["web_thickness"] + ordering_gap)
+    out["bore_thickness"] = max(out["bore_thickness"], out["rim_thickness"] + ordering_gap)
 
     lower_dt = abs(out["bore_thickness"] - out["web_thickness"])
     upper_dt = abs(out["rim_thickness"] - out["web_thickness"])
@@ -172,8 +176,8 @@ def validate_geometry_parameters(params: Dict[str, float]) -> None:
     if params["upper_fillet_radius"] > upper_limit + 1e-9:
         raise ValueError("Invalid geometry: upper_fillet_radius too large for upper transition")
 
-    if params["rim_thickness"] < 0.65 * params["web_thickness"]:
-        raise ValueError("Invalid geometry: rim thickness too thin for stable section construction")
+    if not (params["bore_thickness"] > params["rim_thickness"] > params["web_thickness"]):
+        raise ValueError("Invalid geometry: thickness ordering must satisfy bore_thickness > rim_thickness > web_thickness")
 
 
 def build_disc_contour(params: Dict[str, float], points_per_side: int = 220) -> ContourData:
