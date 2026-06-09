@@ -55,6 +55,18 @@ def _build_surface_interpolants(contour_points: np.ndarray) -> Tuple[np.ndarray,
     return r_unique, xf, xr
 
 
+def _deterministic_jitter(index: np.ndarray, seed: int) -> np.ndarray:
+    """Return deterministic pseudo-random values in [-1, 1] from index and seed.
+
+    Uses a sine-hash style mapping (non-cryptographic) to provide stable,
+    reproducible mesh jitter without relying on runtime RNG state.
+    """
+    # Constants are commonly used sine-hash values from graphics/noise practice.
+    phase = np.sin((index + 1.0) * 12.9898 + (float(seed) + 1.0) * 78.233) * 43758.5453123
+    frac = phase - np.floor(phase)
+    return 2.0 * frac - 1.0
+
+
 def generate_mesh(
     contour_points: np.ndarray,
     grid_x: int,
@@ -72,7 +84,6 @@ def generate_mesh(
     x_min, r_min = contour_points.min(axis=0)
     x_max, r_max = contour_points.max(axis=0)
 
-    rng = np.random.default_rng(seed)
     dx = (x_max - x_min) / max(grid_x - 1, 1)
     dr = (r_max - r_min) / max(grid_r - 1, 1)
 
@@ -81,9 +92,12 @@ def generate_mesh(
     xx, rr = np.meshgrid(gx, gr, indexing="xy")
     candidates = np.column_stack([xx.ravel(), rr.ravel()])
 
-    # Mild de-regularization while reducing edge over-jitter in thin sections.
-    candidates[:, 0] += rng.uniform(-JITTER_FACTOR * dx, JITTER_FACTOR * dx, size=candidates.shape[0])
-    candidates[:, 1] += rng.uniform(-JITTER_FACTOR * dr, JITTER_FACTOR * dr, size=candidates.shape[0])
+    # Mild deterministic de-regularization while reducing edge over-jitter in thin sections.
+    idx = np.arange(candidates.shape[0], dtype=np.float64)
+    jx = _deterministic_jitter(idx, seed)
+    jr = _deterministic_jitter(idx + 0.5 * candidates.shape[0], seed + 7919)
+    candidates[:, 0] += JITTER_FACTOR * dx * jx
+    candidates[:, 1] += JITTER_FACTOR * dr * jr
 
     interior = candidates[poly.contains_points(candidates)]
     interior_list = [interior]
@@ -91,32 +105,34 @@ def generate_mesh(
     # Targeted refinement in transition bands – denser sampling near shoulder regions.
     if radial_breaks is not None and len(radial_breaks) >= 5:
         r_interp, x_front_interp, x_rear_interp = _build_surface_interpolants(contour_points)
-        n_extra = max(grid_x * 3, 60)
-        n_surface_extra = max(grid_x * 2, 50)
+        n_extra_r = max(grid_r // 4, 16)
+        n_extra_eta = max(grid_x // 3, 16)
+        n_surface_extra_r = max(grid_r // 5, 14)
+        shoulder_fracs = np.array([0.02, 0.05, 0.10, 0.16, 0.23], dtype=np.float64)
         for r_start, r_end in [
             (float(radial_breaks[1]), float(radial_breaks[2])),
             (float(radial_breaks[3]), float(radial_breaks[4])),
         ]:
-            ex = rng.uniform(x_min, x_max, n_extra)
-            er = rng.uniform(r_start, r_end, n_extra)
-            extra_cands = np.column_stack([ex, er])
+            r_strip = np.linspace(r_start, r_end, n_extra_r, endpoint=False) + 0.5 * (r_end - r_start) / max(n_extra_r, 1)
+            eta = np.linspace(0.0, 1.0, n_extra_eta, endpoint=False) + 0.5 / max(n_extra_eta, 1)
+            rr_strip, eta_strip = np.meshgrid(r_strip, eta, indexing="xy")
+            x_front = np.interp(rr_strip.ravel(), r_interp, x_front_interp)
+            x_rear = np.interp(rr_strip.ravel(), r_interp, x_rear_interp)
+            extra_x = x_front + eta_strip.ravel() * (x_rear - x_front)
+            extra_cands = np.column_stack([extra_x, rr_strip.ravel()])
             extra_inside = extra_cands[poly.contains_points(extra_cands)]
             if extra_inside.shape[0] > 0:
                 interior_list.append(extra_inside)
 
             # Optional shoulder-focused refinement near outer surfaces inside transition bands.
-            er_surf = rng.uniform(r_start, r_end, n_surface_extra)
-            x_front = np.interp(er_surf, r_interp, x_front_interp)
-            x_rear = np.interp(er_surf, r_interp, x_rear_interp)
-            thickness = np.maximum(x_rear - x_front, 1e-9)
-            side = rng.integers(0, 2, size=n_surface_extra)
-            frac = rng.beta(0.7, 5.0, size=n_surface_extra)
-            ex_surf = np.where(
-                side == 0,
-                x_front + frac * thickness,
-                x_rear - frac * thickness,
-            )
-            shoulder_cands = np.column_stack([ex_surf, er_surf])
+            r_surf = np.linspace(r_start, r_end, n_surface_extra_r, endpoint=False) + 0.5 * (r_end - r_start) / max(n_surface_extra_r, 1)
+            rr_surf, ff = np.meshgrid(r_surf, shoulder_fracs, indexing="xy")
+            x_front_s = np.interp(rr_surf.ravel(), r_interp, x_front_interp)
+            x_rear_s = np.interp(rr_surf.ravel(), r_interp, x_rear_interp)
+            thickness = np.maximum(x_rear_s - x_front_s, 1e-9)
+            shoulder_front = np.column_stack([x_front_s + ff.ravel() * thickness, rr_surf.ravel()])
+            shoulder_rear = np.column_stack([x_rear_s - ff.ravel() * thickness, rr_surf.ravel()])
+            shoulder_cands = np.vstack([shoulder_front, shoulder_rear])
             shoulder_inside = shoulder_cands[poly.contains_points(shoulder_cands)]
             if shoulder_inside.shape[0] > 0:
                 interior_list.append(shoulder_inside)

@@ -116,7 +116,6 @@ def generate_dataset(
             seed=int(seed),
         )
 
-    rng = np.random.default_rng(seed)
     h5f = create_dataset_file(
         output_h5_path=output_h5_path,
         representation=representation,
@@ -125,7 +124,10 @@ def generate_dataset(
     )
     try:
         for sample_id, offsets in enumerate(offsets_list):
-            sample_seed = int(rng.integers(0, 2**31 - 1))
+            # Deterministic per-sample seed without hidden random-process modifiers.
+            # Uses large coprimes and an offset (1_000_003, 7_919, 97) to spread
+            # seeds across the 31-bit range while remaining reproducible.
+            sample_seed = int((int(seed) * 1_000_003 + sample_id * 7_919 + 97) % (2**31 - 1))
             sample = generate_sample(
                 param_offsets=offsets,
                 representation=representation,

@@ -84,6 +84,7 @@ MAX_OFFSET_MM: Dict[str, float] = {
 }
 
 REPRESENTATIONS = ("edge", "edge_proximity", "full")
+THICKNESS_ORDERING_GAP_MM = 0.5
 
 CYCLE_PHASES = (
     "taxi",
@@ -117,6 +118,11 @@ def validate_config_tables() -> None:
     _assert_all_keys(NOMINAL_GEOMETRY_MM, PUBLIC_GEOMETRY_PARAMETERS, "NOMINAL_GEOMETRY_MM")
     _assert_all_keys(MIN_OFFSET_MM, PUBLIC_GEOMETRY_PARAMETERS, "MIN_OFFSET_MM")
     _assert_all_keys(MAX_OFFSET_MM, PUBLIC_GEOMETRY_PARAMETERS, "MAX_OFFSET_MM")
+    bt = float(NOMINAL_GEOMETRY_MM["bore_thickness"])
+    rt = float(NOMINAL_GEOMETRY_MM["rim_thickness"])
+    wt = float(NOMINAL_GEOMETRY_MM["web_thickness"])
+    if not (bt > rt > wt):
+        raise ValueError("Nominal thickness ordering must satisfy bore_thickness > rim_thickness > web_thickness")
 
 
 def resolve_geometry_parameters(param_offsets: Dict[str, float] | None) -> Dict[str, float]:
