@@ -56,6 +56,11 @@ ENV/
 *.xlsx
 *.csv
 
+# Generated dataset artifacts (regenerable outputs, not source/provenance)
+Data_gen/output/
+Data_gen/output_*/
+*.h5
+
 # Misc
 MPOS_Data_Download.xlsx
 Partnumbers_SAP_DATA_with_longtext.xlsx
