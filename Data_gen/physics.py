@@ -69,6 +69,25 @@ def _geometry_section_thickness(
     return np.maximum(_thickness_profile(r, params, radial_breaks), MIN_THICKNESS_MM)
 
 
+def _reference_section_thickness(
+    params: Dict[str, float],
+    radial_breaks: np.ndarray,
+) -> float:
+    """Representation-invariant reference thickness for stress amplification.
+
+    Must depend only on the geometry, never on the evaluated node set: otherwise
+    the same physical point receives a different stress label in the edge vs
+    edge_proximity vs full representation (the median of `nodes` differs between
+    sampling schemes).  Uses the axisymmetric volume-weighted (r-weighted) mean
+    thickness over a fixed dense radial sampling of the disc span.
+    """
+    from .geometry import _thickness_profile
+    r_samp = np.linspace(float(radial_breaks[0]), float(radial_breaks[5]), 512)
+    t_samp = np.maximum(_thickness_profile(r_samp, params, radial_breaks), MIN_THICKNESS_MM)
+    weight_sum = float(np.sum(r_samp))
+    return float(np.sum(t_samp * r_samp) / max(weight_sum, EPS))
+
+
 def _transition_concentration(
     nodes: np.ndarray,
     params: Dict[str, float],
@@ -131,7 +150,9 @@ def compute_phase_equivalent_stresses(
     rotor_shape = 0.44 * radial_term + 0.56 * hoop_term
 
     section_thickness = _geometry_section_thickness(nodes, geometry_params, radial_breaks)
-    t_ref = np.median(section_thickness)
+    # Geometry-only reference (independent of the evaluated node set) so the same
+    # physical point yields an identical stress label across edge/edge_proximity/full.
+    t_ref = _reference_section_thickness(geometry_params, radial_breaks)
     thin_amp = np.power(np.clip(t_ref / section_thickness, 0.55, 1.95), 0.72)
     surface_proximity = np.clip((2.0 * np.abs(nodes[:, 0])) / np.maximum(section_thickness, MIN_THICKNESS_MM), 0.0, 1.0)
 
