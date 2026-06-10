@@ -45,6 +45,13 @@ def _targets_from_fem_field(
         empty = np.empty((0, CYCLE_SPEED_FACTORS.shape[0]), dtype=np.float64)
         return empty, np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64)
 
+    if not np.any(base_vm_mesh):
+        n = query_nodes.shape[0]
+        n_phases = CYCLE_SPEED_FACTORS.shape[0]
+        empty_stress = np.zeros((n, n_phases), dtype=np.float64)
+        empty_scalar = np.zeros(n, dtype=np.float64)
+        return empty_stress, empty_scalar, empty_scalar
+
     tree = cKDTree(mesh_nodes)
     _, nearest = tree.query(query_nodes, k=1)
     base_vm = base_vm_mesh[nearest]
@@ -108,18 +115,23 @@ def generate_sample(
         mesh_obj=mesh.mesh,
         triangles=mesh.triangles,
     )
+    fem_failed = not np.any(mesh_phase_stress)  # True if all-zero (FEM failure)
     mesh_stress_max_vm = compute_stress_max(mesh_phase_stress)
-    mesh_life_raw = compute_life_raw(
-        phase_stress=mesh_phase_stress,
-        zone_ids=mesh_zone_id,
-        nodes=mesh.nodes,
-        geometry_params=actual_params,
-        radial_breaks=radial_breaks,
-        lifing_mode=lifing_mode,
-    )
+    if fem_failed:
+        mesh_life_raw = np.zeros(mesh_phase_stress.shape[0], dtype=np.float64)
+    else:
+        mesh_life_raw = compute_life_raw(
+            phase_stress=mesh_phase_stress,
+            zone_ids=mesh_zone_id,
+            nodes=mesh.nodes,
+            geometry_params=actual_params,
+            radial_breaks=radial_breaks,
+            lifing_mode=lifing_mode,
+        )
     # Base (takeoff, speed_factor=1) von Mises field used to interpolate to any
     # off-mesh sample points (contour / edge representations).
-    base_vm_mesh = mesh_phase_stress[:, list(CYCLE_SPEED_FACTORS).index(max(CYCLE_SPEED_FACTORS))]
+    takeoff_idx = int(np.argmax(CYCLE_SPEED_FACTORS))
+    base_vm_mesh = mesh_phase_stress[:, takeoff_idx]
 
     contour_zone_id, contour_region_id = assign_zone_and_region_from_radius(
         nodes=contour.points,

@@ -42,7 +42,7 @@ POISSON_RATIO = 0.34       # Poisson's ratio [-]
 DENSITY_KG_M3 = 4430.0     # density [kg/m^3]
 
 # --- Operating point ---------------------------------------------------------
-OMEGA_REF_RAD_S = 2000.0   # takeoff rotational speed [rad/s]
+OMEGA_REF_RAD_S = 3000.0   # takeoff rotational speed [rad/s]
 
 EPS = 1e-6
 
@@ -162,13 +162,13 @@ def _nodal_stresses(basis, x, C):
             e_xr = du[0, 1] + du[1, 0]
             e = [e_xx, e_rr, e_tt, e_xr]
             sig = sum(C[component, j] * e[j] for j in range(4))
-            return sig * v
+            return sig * v * w.x[1]
 
         return lf
 
     @BilinearForm
     def mass(u, v, w):
-        return u * v
+        return u * v * w.x[1]
 
     disp = basis.interpolate(x)
     M = mass.assemble(scalar_basis)

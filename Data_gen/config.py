@@ -118,8 +118,8 @@ CYCLE_PHASE_WEIGHTS = np.array([0.20, 0.08, 0.15, 0.32, 0.12, 0.05, 0.08], dtype
 #   * slope_high is the Basquin exponent of the high-cycle (above-knee) branch.
 #     Ti-6Al-4V high-cycle slopes lie in the ~8–12 range; notched transition
 #     zones are slightly steeper (more stress-sensitive) than the bulk.
-#   * slope_low is the shallower long-life (below-knee) branch used past the
-#     knee, kept distinctly lower so the piecewise log-log curve flattens out.
+#   * slope_low is the long-life (below-knee) branch exponent; it is set
+#     larger than slope_high so the curve flattens out in log(sigma) vs log(N).
 # These are engineering allowables per zone, not random per-sample materials.
 # ---------------------------------------------------------------------------
 SIGMA_E0_MPA = 620.0
