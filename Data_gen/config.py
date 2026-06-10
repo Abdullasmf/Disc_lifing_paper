@@ -99,6 +99,76 @@ CYCLE_SPEED_FACTORS = np.array([0.20, 1.00, 0.86, 0.78, 0.55, 0.46, 0.18], dtype
 CYCLE_PHASE_WEIGHTS = np.array([0.20, 0.08, 0.15, 0.32, 0.12, 0.05, 0.08], dtype=np.float64)
 
 
+# ---------------------------------------------------------------------------
+# S-N (stress-life) fatigue parameters for the life model.
+#
+# Derivation (Ti-6Al-4V, fully-reversed R=-1, polished baseline):
+#   * Baseline high-cycle fatigue strength of Ti-6Al-4V is ~600 MPa at the knee
+#     (~1e7 cycles) for smooth, polished, R=-1 specimens. We anchor the knee
+#     stress to a base endurance limit SIGMA_E0 = 620 MPa and apply a
+#     per-zone knockdown factor that lumps notch sensitivity, surface finish,
+#     size and stress-gradient effects for each engineering zone:
+#         bore=0.80, lower_transition=0.75, web=0.90,
+#         upper_transition=0.75, rim=0.85
+#     giving knee_stress_mpa = SIGMA_E0 * knockdown (≈465–558 MPa, within the
+#     ~500–620 MPa target band; the transition shoulders are the harshest).
+#   * knee_life is the cycle count at the knee: ~1e6–1e7. Stress-concentrating
+#     transition shoulders are placed at the lower end (5e6) and the bulk
+#     bore/web/rim at 1e7.
+#   * slope_high is the Basquin exponent of the high-cycle (above-knee) branch.
+#     Ti-6Al-4V high-cycle slopes lie in the ~8–12 range; notched transition
+#     zones are slightly steeper (more stress-sensitive) than the bulk.
+#   * slope_low is the shallower long-life (below-knee) branch used past the
+#     knee, kept distinctly lower so the piecewise log-log curve flattens out.
+# These are engineering allowables per zone, not random per-sample materials.
+# ---------------------------------------------------------------------------
+SIGMA_E0_MPA = 620.0
+ZONE_KNOCKDOWN = {
+    "bore": 0.80,
+    "lower_transition": 0.75,
+    "web": 0.90,
+    "upper_transition": 0.75,
+    "rim": 0.85,
+}
+
+ZONAL_SN_PARAMS: Dict[str, Dict[str, float]] = {
+    "bore": {
+        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["bore"],          # 496.0
+        "knee_life": 1.0e7,
+        "slope_high": 9.5,
+        "slope_low": 22.0,
+    },
+    "lower_transition": {
+        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["lower_transition"],  # 465.0
+        "knee_life": 5.0e6,
+        "slope_high": 11.0,
+        "slope_low": 24.0,
+    },
+    "web": {
+        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["web"],           # 558.0
+        "knee_life": 1.0e7,
+        "slope_high": 8.5,
+        "slope_low": 20.0,
+    },
+    "upper_transition": {
+        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["upper_transition"],  # 465.0
+        "knee_life": 5.0e6,
+        "slope_high": 11.0,
+        "slope_low": 24.0,
+    },
+    "rim": {
+        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["rim"],           # 527.0
+        "knee_life": 1.0e7,
+        "slope_high": 9.0,
+        "slope_low": 21.0,
+    },
+}
+
+# Uniform mode: a single S-N curve for every zone, equal to the web-zone set
+# (the highest-knockdown bulk allowable per CHANGE 2c).
+UNIFORM_SN_PARAMS: Dict[str, float] = dict(ZONAL_SN_PARAMS["web"])
+
+
 @dataclass(frozen=True)
 class SampleGenerationConfig:
     contour_points_per_side: int = 220
