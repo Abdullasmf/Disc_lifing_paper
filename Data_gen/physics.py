@@ -42,7 +42,7 @@ POISSON_RATIO = 0.34       # Poisson's ratio [-]
 DENSITY_KG_M3 = 4430.0     # density [kg/m^3]
 
 # --- Operating point ---------------------------------------------------------
-OMEGA_REF_RAD_S = 3000.0   # takeoff rotational speed [rad/s]
+OMEGA_REF_RAD_S = 4000.0   # takeoff rotational speed [rad/s]
 
 EPS = 1e-6
 
