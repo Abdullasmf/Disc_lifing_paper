@@ -133,39 +133,45 @@ ZONE_KNOCKDOWN = {
 
 ZONAL_SN_PARAMS: Dict[str, Dict[str, float]] = {
     "bore": {
-        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["bore"],          # 496.0
+        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["bore"],          # 496.0
+        "knee_stress_mpa": 220.0,
         "knee_life": 1.0e7,
         "slope_high": 9.5,
         "slope_low": 22.0,
     },
     "lower_transition": {
-        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["lower_transition"],  # 465.0
+        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["lower_transition"],  # 465.0
+        "knee_stress_mpa": 180.0,
         "knee_life": 5.0e6,
         "slope_high": 11.0,
         "slope_low": 24.0,
     },
     "web": {
-        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["web"],           # 558.0
+        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["web"],           # 558.0
+        "knee_stress_mpa": 260.0,
         "knee_life": 1.0e7,
         "slope_high": 8.5,
         "slope_low": 20.0,
     },
     "upper_transition": {
-        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["upper_transition"],  # 465.0
+        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["upper_transition"],  # 465.0
+        "knee_stress_mpa": 180.0,
         "knee_life": 5.0e6,
         "slope_high": 11.0,
         "slope_low": 24.0,
     },
     "rim": {
-        "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["rim"],           # 527.0
+        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["rim"],           # 527.0
+        "knee_stress_mpa": 240.0,
         "knee_life": 1.0e7,
         "slope_high": 9.0,
         "slope_low": 21.0,
     },
 }
-
+# Knee stresses calibrated to the FEM stress field at the nominal operating point (ω = 4000 rad/s), scaled per zone by surface finish and notch sensitivity knockdowns relative to the computed amplitude range.
 # Uniform mode: a single S-N curve for every zone, equal to the web-zone set
 # (the highest-knockdown bulk allowable per CHANGE 2c).
+# UNIFORM_SN_PARAMS: Dict[str, float] = dict(ZONAL_SN_PARAMS["web"])
 UNIFORM_SN_PARAMS: Dict[str, float] = dict(ZONAL_SN_PARAMS["web"])
 
 
