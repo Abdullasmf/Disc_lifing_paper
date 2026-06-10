@@ -1,4 +1,13 @@
-"""Meshing and radius-threshold zone/region assignment."""
+"""Deterministic FEM meshing (scikit-fem P2) and radius-threshold zone/region assignment.
+
+The mesh is a clean structured-Delaunay triangulation of the disc meridional
+cross-section, built directly from the parametric front/rear thickness profile so
+element edges align with the true boundary.  It is fully deterministic given the
+geometry parameters (no random jitter, no seed dependence) and is locally refined
+in the lower- and upper-transition radial bands where stress concentrates.  The
+resulting :class:`MeshData` exposes a ``skfem.MeshTri`` used directly for the
+axisymmetric FEA solve and for ML feature extraction.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +21,12 @@ from skfem import MeshTri
 
 from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
 
-
-JITTER_FACTOR = 0.32
-# 0.32 keeps the cloud randomized but avoids frequent edge leakage in thin-web cases.
+# Base number of radial sampling levels across the full disc span and the number
+# of through-thickness nodes per level.  These set the nominal (coarse) density;
+# transition bands receive a refinement multiplier on the radial spacing.
+BASE_RADIAL_LEVELS = 110
+THICKNESS_NODES = 11
+TRANSITION_REFINE_FACTOR = 3  # transition bands get this many extra radial levels per base step
 
 
 @dataclass
@@ -28,43 +40,40 @@ class MeshData:
 
 
 def _unique_rows(points: np.ndarray) -> np.ndarray:
-    uniq, idx = np.unique(points, axis=0, return_index=True)
-    return uniq[np.argsort(idx)]
+    uniq, idx = np.unique(np.round(points, 9), axis=0, return_index=True)
+    order = np.argsort(idx)
+    return points[idx[order]]
 
 
-def _build_surface_interpolants(contour_points: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Build radial interpolants of front and rear surfaces from contour points."""
-    front = contour_points[contour_points[:, 0] <= 0.0]
-    rear = contour_points[contour_points[:, 0] >= 0.0]
-
-    r_front = front[:, 1]
-    r_rear = rear[:, 1]
-    x_front = front[:, 0]
-    x_rear = rear[:, 0]
-
-    idx_f = np.argsort(r_front)
-    idx_r = np.argsort(r_rear)
-    r_front_sorted = r_front[idx_f]
-    r_rear_sorted = r_rear[idx_r]
-    x_front_sorted = x_front[idx_f]
-    x_rear_sorted = x_rear[idx_r]
-
-    r_unique = np.unique(np.concatenate([r_front_sorted, r_rear_sorted]))
-    xf = np.interp(r_unique, r_front_sorted, x_front_sorted)
-    xr = np.interp(r_unique, r_rear_sorted, x_rear_sorted)
-    return r_unique, xf, xr
+def _thickness_at(r: np.ndarray, params: dict, radial_breaks: np.ndarray) -> np.ndarray:
+    from .geometry import _thickness_profile
+    return _thickness_profile(r, params, radial_breaks)
 
 
-def _deterministic_jitter(index: np.ndarray, seed: int) -> np.ndarray:
-    """Return deterministic pseudo-random values in [-1, 1] from index and seed.
+def _radial_levels(radial_breaks: np.ndarray) -> np.ndarray:
+    """Deterministic, monotonically increasing radial sampling stations.
 
-    Uses a sine-hash style mapping (non-cryptographic) to provide stable,
-    reproducible mesh jitter without relying on runtime RNG state.
+    Levels are spread roughly uniformly across the whole span, then the lower
+    ([r1,r2]) and upper ([r3,r4]) transition bands are densified by inserting
+    additional stations so those regions are finer than bore/web/rim.
     """
-    # Constants are commonly used sine-hash values from graphics/noise practice.
-    phase = np.sin((index + 1.0) * 12.9898 + (float(seed) + 1.0) * 78.233) * 43758.5453123
-    frac = phase - np.floor(phase)
-    return 2.0 * frac - 1.0
+    r0 = float(radial_breaks[0])
+    r5 = float(radial_breaks[5])
+    r1, r2, r3, r4 = (float(radial_breaks[i]) for i in (1, 2, 3, 4))
+
+    base = np.linspace(r0, r5, BASE_RADIAL_LEVELS)
+
+    span = max(r5 - r0, 1e-9)
+    extra = []
+    for r_start, r_end in ((r1, r2), (r3, r4)):
+        band_frac = max(r_end - r_start, 1e-9) / span
+        n_band_base = max(int(round(band_frac * BASE_RADIAL_LEVELS)), 2)
+        n_refined = n_band_base * TRANSITION_REFINE_FACTOR
+        extra.append(np.linspace(r_start, r_end, n_refined))
+
+    levels = np.concatenate([base] + extra)
+    levels = np.unique(np.round(levels, 9))
+    return levels
 
 
 def generate_mesh(
@@ -73,79 +82,65 @@ def generate_mesh(
     grid_r: int,
     seed: int = 0,
     radial_breaks: Optional[np.ndarray] = None,
+    geometry_params: Optional[dict] = None,
 ) -> MeshData:
-    """Generate a Delaunay mesh from the contour with optional transition-band refinement.
+    """Generate a deterministic P2-ready triangular FEM mesh of the cross-section.
 
-    radial_breaks: array [r0, r1, r2, r3, r4, r5].  When provided, extra interior
-    points are sampled uniformly within the lower- and upper-transition radial bands
-    so that the mesh is locally denser near the stress-concentrating shoulder regions.
+    The mesh is built from the parametric front/rear surfaces of the disc (the
+    profile is symmetric about x=0), so the boundary is represented exactly.  The
+    ``seed``, ``grid_x`` and ``grid_r`` arguments are accepted for call-site
+    compatibility but do not introduce any randomness — the mesh is a pure
+    function of the geometry.  When ``geometry_params`` is not supplied the
+    thickness profile is recovered from the contour envelope.
     """
+    contour_points = np.asarray(contour_points, dtype=np.float64)
     poly = Path(contour_points)
-    x_min, r_min = contour_points.min(axis=0)
-    x_max, r_max = contour_points.max(axis=0)
 
-    dx = (x_max - x_min) / max(grid_x - 1, 1)
-    dr = (r_max - r_min) / max(grid_r - 1, 1)
+    if radial_breaks is None:
+        # Fallback: derive a span from the contour extent.
+        r_min = float(contour_points[:, 1].min())
+        r_max = float(contour_points[:, 1].max())
+        radial_breaks = np.array([r_min, r_min, r_min, r_max, r_max, r_max], dtype=np.float64)
 
-    gx = np.linspace(x_min, x_max, grid_x)
-    gr = np.linspace(r_min, r_max, grid_r)
-    xx, rr = np.meshgrid(gx, gr, indexing="xy")
-    candidates = np.column_stack([xx.ravel(), rr.ravel()])
+    levels = _radial_levels(radial_breaks)
 
-    # Mild deterministic de-regularization while reducing edge over-jitter in thin sections.
-    idx = np.arange(candidates.shape[0], dtype=np.float64)
-    jx = _deterministic_jitter(idx, seed)
-    jr = _deterministic_jitter(idx + 0.5 * candidates.shape[0], seed + 7919)
-    candidates[:, 0] += JITTER_FACTOR * dx * jx
-    candidates[:, 1] += JITTER_FACTOR * dr * jr
+    if geometry_params is not None:
+        half_t = 0.5 * np.maximum(_thickness_at(levels, geometry_params, radial_breaks), 1e-9)
+    else:
+        # Recover thickness from contour envelope at each radial level.
+        tree_r = contour_points[:, 1]
+        half_t = np.empty_like(levels)
+        for i, r in enumerate(levels):
+            near = contour_points[np.abs(tree_r - r) <= (levels[-1] - levels[0]) / len(levels) + 1e-9]
+            if near.shape[0] >= 2:
+                half_t[i] = 0.5 * (near[:, 0].max() - near[:, 0].min())
+            else:
+                half_t[i] = 1e-9
+        half_t = np.maximum(half_t, 1e-9)
 
-    interior = candidates[poly.contains_points(candidates)]
-    interior_list = [interior]
-
-    # Targeted refinement in transition bands – denser sampling near shoulder regions.
-    if radial_breaks is not None and len(radial_breaks) >= 5:
-        r_interp, x_front_interp, x_rear_interp = _build_surface_interpolants(contour_points)
-        n_extra_r = max(grid_r // 4, 16)
-        n_extra_eta = max(grid_x // 3, 16)
-        n_surface_extra_r = max(grid_r // 5, 14)
-        shoulder_fracs = np.array([0.02, 0.05, 0.10, 0.16, 0.23], dtype=np.float64)
-        for r_start, r_end in [
-            (float(radial_breaks[1]), float(radial_breaks[2])),
-            (float(radial_breaks[3]), float(radial_breaks[4])),
-        ]:
-            r_strip = np.linspace(r_start, r_end, n_extra_r, endpoint=False) + 0.5 * (r_end - r_start) / max(n_extra_r, 1)
-            eta = np.linspace(0.0, 1.0, n_extra_eta, endpoint=False) + 0.5 / max(n_extra_eta, 1)
-            rr_strip, eta_strip = np.meshgrid(r_strip, eta, indexing="xy")
-            x_front = np.interp(rr_strip.ravel(), r_interp, x_front_interp)
-            x_rear = np.interp(rr_strip.ravel(), r_interp, x_rear_interp)
-            extra_x = x_front + eta_strip.ravel() * (x_rear - x_front)
-            extra_cands = np.column_stack([extra_x, rr_strip.ravel()])
-            extra_inside = extra_cands[poly.contains_points(extra_cands)]
-            if extra_inside.shape[0] > 0:
-                interior_list.append(extra_inside)
-
-            # Optional shoulder-focused refinement near outer surfaces inside transition bands.
-            r_surf = np.linspace(r_start, r_end, n_surface_extra_r, endpoint=False) + 0.5 * (r_end - r_start) / max(n_surface_extra_r, 1)
-            rr_surf, ff = np.meshgrid(r_surf, shoulder_fracs, indexing="xy")
-            x_front_s = np.interp(rr_surf.ravel(), r_interp, x_front_interp)
-            x_rear_s = np.interp(rr_surf.ravel(), r_interp, x_rear_interp)
-            thickness = np.maximum(x_rear_s - x_front_s, 1e-9)
-            shoulder_front = np.column_stack([x_front_s + ff.ravel() * thickness, rr_surf.ravel()])
-            shoulder_rear = np.column_stack([x_rear_s - ff.ravel() * thickness, rr_surf.ravel()])
-            shoulder_cands = np.vstack([shoulder_front, shoulder_rear])
-            shoulder_inside = shoulder_cands[poly.contains_points(shoulder_cands)]
-            if shoulder_inside.shape[0] > 0:
-                interior_list.append(shoulder_inside)
-
-    combined = np.vstack(interior_list)
-    points = _unique_rows(np.vstack([contour_points, combined]))
+    # Build structured node rows across the thickness at each radial level.
+    eta = np.linspace(-1.0, 1.0, THICKNESS_NODES)
+    node_list = []
+    for r, ht in zip(levels, half_t):
+        xs = eta * ht
+        rs = np.full_like(xs, r)
+        node_list.append(np.column_stack([xs, rs]))
+    points = np.vstack(node_list)
+    points = _unique_rows(points)
 
     tri = Delaunay(points)
     triangles = tri.simplices
     centroids = points[triangles].mean(axis=1)
     triangles = triangles[poly.contains_points(centroids)]
 
-    mesh = MeshTri(points.T, triangles.T)
+    # Drop nodes that ended up unreferenced after culling, then compact indices.
+    used = np.unique(triangles)
+    remap = -np.ones(points.shape[0], dtype=np.int64)
+    remap[used] = np.arange(used.shape[0])
+    points = points[used]
+    triangles = remap[triangles]
+
+    mesh = MeshTri(points.T, triangles.T.astype(np.int64))
     boundary_nodes = np.asarray(mesh.boundary_nodes(), dtype=np.int32)
 
     tree = cKDTree(contour_points)

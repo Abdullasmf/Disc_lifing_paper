@@ -95,6 +95,7 @@ def generate_dataset(
     lhs_min_offsets: Dict[str, float] | None = None,
     lhs_max_offsets: Dict[str, float] | None = None,
     include_debug_fields: bool = False,
+    lifing_mode: str = "zonal",
 ) -> None:
     if representation not in REPRESENTATIONS:
         raise ValueError(f"representation must be one of {REPRESENTATIONS}")
@@ -134,6 +135,7 @@ def generate_dataset(
                 seed=sample_seed,
                 include_derivatives=include_derivatives,
                 include_debug_fields=include_debug_fields,
+                lifing_mode=lifing_mode,
             )
             write_sample_group(h5f, sample_id=sample_id, sample_seed=sample_seed, sample=sample)
     finally:
@@ -147,6 +149,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-derivatives", action="store_true")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--include-debug-fields", action="store_true")
+    parser.add_argument("--lifing-mode", type=str, default="zonal", choices=["zonal", "uniform"])
 
     parser.add_argument("--param-list-json", type=Path, default=None)
     parser.add_argument("--num-samples", type=int, default=DEFAULT_NUM_SAMPLES)
@@ -167,6 +170,7 @@ def main() -> None:
             seed=args.seed,
             explicit_param_offsets=offsets_list,
             include_debug_fields=args.include_debug_fields,
+            lifing_mode=args.lifing_mode,
         )
     else:
         min_offsets = _load_offset_bounds(args.min_offsets_json, MIN_OFFSET_MM)
@@ -180,6 +184,7 @@ def main() -> None:
             lhs_min_offsets=min_offsets,
             lhs_max_offsets=max_offsets,
             include_debug_fields=args.include_debug_fields,
+            lifing_mode=args.lifing_mode,
         )
 
 
