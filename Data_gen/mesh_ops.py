@@ -1,32 +1,32 @@
-"""Deterministic FEM meshing (scikit-fem P2) and radius-threshold zone/region assignment.
+"""Unstructured FEM meshing via gmsh and radius-threshold zone/region assignment.
 
-The mesh is a clean structured-Delaunay triangulation of the disc meridional
-cross-section, built directly from the parametric front/rear thickness profile so
-element edges align with the true boundary.  It is fully deterministic given the
-geometry parameters (no random jitter, no seed dependence) and is locally refined
-in the lower- and upper-transition radial bands where stress concentrates.  The
-resulting :class:`MeshData` exposes a ``skfem.MeshTri`` used directly for the
-axisymmetric FEA solve and for ML feature extraction.
+The mesh is a boundary-conforming unstructured triangulation of the disc meridional
+cross-section, built with the gmsh Python API.  Element size is graded: fine near
+the fillet/transition radii where stress concentrates, coarser in the bore, web and
+rim bulks.  The resulting node count varies with geometry (as in real FEM practice).
+The :class:`MeshData` exposes a ``skfem.MeshTri`` used directly for the axisymmetric
+FEA solve and for ML feature extraction.
 """
 
 from __future__ import annotations
 
+import tempfile
+import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import numpy as np
-from matplotlib.path import Path
-from scipy.spatial import Delaunay, cKDTree
+from scipy.spatial import cKDTree
 from skfem import MeshTri
 
 from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
 
-# Base number of radial sampling levels across the full disc span and the number
-# of through-thickness nodes per level.  These set the nominal (coarse) density;
-# transition bands receive a refinement multiplier on the radial spacing.
-BASE_RADIAL_LEVELS = 110
-THICKNESS_NODES = 11
-TRANSITION_REFINE_FACTOR = 3  # transition bands get this many extra radial levels per base step
+# ---------------------------------------------------------------------------
+# Mesh size parameters (mm)
+# ---------------------------------------------------------------------------
+LC_BULK = 2.5       # element size in bore / web / rim bulk regions
+LC_FILLET = 0.5     # element size near fillet / transition zones
+FILLET_INFLUENCE_MM = 4.0  # radius around fillet points that gets fine mesh
 
 
 @dataclass
@@ -45,35 +45,16 @@ def _unique_rows(points: np.ndarray) -> np.ndarray:
     return points[idx[order]]
 
 
-def _thickness_at(r: np.ndarray, params: dict, radial_breaks: np.ndarray) -> np.ndarray:
-    from .geometry import _thickness_profile
-    return _thickness_profile(r, params, radial_breaks)
-
-
-def _radial_levels(radial_breaks: np.ndarray) -> np.ndarray:
-    """Deterministic, monotonically increasing radial sampling stations.
-
-    Levels are spread roughly uniformly across the whole span, then the lower
-    ([r1,r2]) and upper ([r3,r4]) transition bands are densified by inserting
-    additional stations so those regions are finer than bore/web/rim.
-    """
-    r0 = float(radial_breaks[0])
-    r5 = float(radial_breaks[5])
-    r1, r2, r3, r4 = (float(radial_breaks[i]) for i in (1, 2, 3, 4))
-
-    base = np.linspace(r0, r5, BASE_RADIAL_LEVELS)
-
-    span = max(r5 - r0, 1e-9)
-    extra = []
-    for r_start, r_end in ((r1, r2), (r3, r4)):
-        band_frac = max(r_end - r_start, 1e-9) / span
-        n_band_base = max(int(round(band_frac * BASE_RADIAL_LEVELS)), 2)
-        n_refined = n_band_base * TRANSITION_REFINE_FACTOR
-        extra.append(np.linspace(r_start, r_end, n_refined))
-
-    levels = np.concatenate([base] + extra)
-    levels = np.unique(np.round(levels, 9))
-    return levels
+def _fillet_points(contour_points: np.ndarray, radial_breaks: np.ndarray) -> np.ndarray:
+    """Return contour points that lie close to the fillet transition radii."""
+    r1, r2, r3, r4 = float(radial_breaks[1]), float(radial_breaks[2]), \
+                     float(radial_breaks[3]), float(radial_breaks[4])
+    fillet_radii = np.array([r1, r2, r3, r4])
+    rs = contour_points[:, 1]
+    mask = np.zeros(len(rs), dtype=bool)
+    for rf in fillet_radii:
+        mask |= np.abs(rs - rf) < FILLET_INFLUENCE_MM
+    return contour_points[mask]
 
 
 def generate_mesh(
@@ -84,63 +65,126 @@ def generate_mesh(
     radial_breaks: Optional[np.ndarray] = None,
     geometry_params: Optional[dict] = None,
 ) -> MeshData:
-    """Generate a deterministic P2-ready triangular FEM mesh of the cross-section.
+    """Generate an unstructured boundary-conforming triangular mesh via gmsh.
 
-    The mesh is built from the parametric front/rear surfaces of the disc (the
-    profile is symmetric about x=0), so the boundary is represented exactly.  The
-    ``seed``, ``grid_x`` and ``grid_r`` arguments are accepted for call-site
-    compatibility but do not introduce any randomness — the mesh is a pure
-    function of the geometry.  When ``geometry_params`` is not supplied the
-    thickness profile is recovered from the contour envelope.
+    ``grid_x``, ``grid_r`` and ``seed`` are accepted for call-site compatibility
+    but are unused — mesh density is controlled by ``LC_BULK`` and ``LC_FILLET``.
     """
+    import gmsh
+
     contour_points = np.asarray(contour_points, dtype=np.float64)
-    poly = Path(contour_points)
 
     if radial_breaks is None:
-        # Fallback: derive a span from the contour extent.
         r_min = float(contour_points[:, 1].min())
         r_max = float(contour_points[:, 1].max())
-        radial_breaks = np.array([r_min, r_min, r_min, r_max, r_max, r_max], dtype=np.float64)
+        radial_breaks = np.array([r_min, r_min, r_min, r_max, r_max, r_max])
 
-    levels = _radial_levels(radial_breaks)
+    # Identify which contour points are near fillets (get fine mesh size)
+    fillet_pts = _fillet_points(contour_points, radial_breaks)
+    fillet_set = set(map(tuple, np.round(fillet_pts, 6)))
 
-    if geometry_params is not None:
-        half_t = 0.5 * np.maximum(_thickness_at(levels, geometry_params, radial_breaks), 1e-9)
-    else:
-        # Recover thickness from contour envelope at each radial level.
-        tree_r = contour_points[:, 1]
-        half_t = np.empty_like(levels)
-        for i, r in enumerate(levels):
-            near = contour_points[np.abs(tree_r - r) <= (levels[-1] - levels[0]) / len(levels) + 1e-9]
-            if near.shape[0] >= 2:
-                half_t[i] = 0.5 * (near[:, 0].max() - near[:, 0].min())
+    gmsh.initialize()
+    gmsh.option.setNumber("General.Terminal", 0)   # suppress output
+    gmsh.option.setNumber("Mesh.Algorithm", 6)      # Frontal-Delaunay (6) — best for curved boundaries
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMin", LC_FILLET * 0.5)
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMax", LC_BULK)
+    gmsh.model.add("disc_meridional")
+
+    try:
+        # --- Add all contour points -------------------------------------------
+        point_tags = []
+        for x, r in contour_points:
+            lc = LC_FILLET if (round(x, 6), round(r, 6)) in fillet_set else LC_BULK
+            tag = gmsh.model.geo.addPoint(x, r, 0.0, lc)
+            point_tags.append(tag)
+
+        # --- Connect into a closed loop (spline segments per zone boundary) ---
+        n = len(point_tags)
+        line_tags = []
+        for i in range(n):
+            tag = gmsh.model.geo.addLine(point_tags[i], point_tags[(i + 1) % n])
+            line_tags.append(tag)
+
+        loop_tag = gmsh.model.geo.addCurveLoop(line_tags)
+        surface_tag = gmsh.model.geo.addPlaneSurface([loop_tag])
+
+        gmsh.model.geo.synchronize()
+
+        # --- Refine around fillet zones with a distance field -----------------
+        r1, r2, r3, r4 = (float(radial_breaks[i]) for i in (1, 2, 3, 4))
+        fillet_radii = [r1, r2, r3, r4]
+
+        field_ids = []
+        for rf in fillet_radii:
+            # Collect point tags at this radius
+            pts_at_r = [
+                point_tags[i]
+                for i, (_, r) in enumerate(contour_points)
+                if abs(r - rf) < FILLET_INFLUENCE_MM
+            ]
+            if not pts_at_r:
+                continue
+            fid = gmsh.model.mesh.field.add("Distance")
+            gmsh.model.mesh.field.setNumbers(fid, "PointsList", pts_at_r)
+            field_ids.append(fid)
+
+        if field_ids:
+            threshold_ids = []
+            for fid in field_ids:
+                tid = gmsh.model.mesh.field.add("Threshold")
+                gmsh.model.mesh.field.setNumber(tid, "InField", fid)
+                gmsh.model.mesh.field.setNumber(tid, "SizeMin", LC_FILLET)
+                gmsh.model.mesh.field.setNumber(tid, "SizeMax", LC_BULK)
+                gmsh.model.mesh.field.setNumber(tid, "DistMin", 0.0)
+                gmsh.model.mesh.field.setNumber(tid, "DistMax", FILLET_INFLUENCE_MM * 2.0)
+                threshold_ids.append(tid)
+
+            if len(threshold_ids) > 1:
+                min_fid = gmsh.model.mesh.field.add("Min")
+                gmsh.model.mesh.field.setNumbers(min_fid, "FieldsList", threshold_ids)
+                gmsh.model.mesh.field.setAsBackgroundMesh(min_fid)
             else:
-                half_t[i] = 1e-9
-        half_t = np.maximum(half_t, 1e-9)
+                gmsh.model.mesh.field.setAsBackgroundMesh(threshold_ids[0])
 
-    # Build structured node rows across the thickness at each radial level.
-    eta = np.linspace(-1.0, 1.0, THICKNESS_NODES)
-    node_list = []
-    for r, ht in zip(levels, half_t):
-        xs = eta * ht
-        rs = np.full_like(xs, r)
-        node_list.append(np.column_stack([xs, rs]))
-    points = np.vstack(node_list)
-    points = _unique_rows(points)
+        # --- Generate 2-D mesh ------------------------------------------------
+        gmsh.model.mesh.generate(2)
+        gmsh.model.mesh.optimize("Laplace2D")   # smooth for better element quality
 
-    tri = Delaunay(points)
-    triangles = tri.simplices
-    centroids = points[triangles].mean(axis=1)
-    triangles = triangles[poly.contains_points(centroids)]
+        # --- Extract nodes and triangles --------------------------------------
+        node_tags, coords, _ = gmsh.model.mesh.getNodes()
+        coords = coords.reshape(-1, 3)
+        points = coords[:, :2].copy()   # x, r (drop z=0)
 
-    # Drop nodes that ended up unreferenced after culling, then compact indices.
+        # gmsh node tags are 1-based and not necessarily contiguous
+        tag_to_idx = {int(t): i for i, t in enumerate(node_tags)}
+
+        elem_types, elem_tags, elem_node_tags = gmsh.model.mesh.getElements(dim=2)
+        tri_list = []
+        for etype, enodes in zip(elem_types, elem_node_tags):
+            if etype == 2:   # 3-node triangle
+                tri_arr = enodes.reshape(-1, 3)
+                tri_list.append(tri_arr)
+            elif etype == 9:  # 6-node quadratic triangle — take corner nodes only
+                tri_arr = enodes.reshape(-1, 6)[:, :3]
+                tri_list.append(tri_arr)
+
+        if not tri_list:
+            raise RuntimeError("gmsh returned no triangular elements")
+
+        triangles_raw = np.vstack(tri_list).astype(np.int64)
+        triangles = np.vectorize(tag_to_idx.__getitem__)(triangles_raw)
+
+    finally:
+        gmsh.finalize()
+
+    # --- Compact: drop unreferenced nodes ------------------------------------
     used = np.unique(triangles)
     remap = -np.ones(points.shape[0], dtype=np.int64)
     remap[used] = np.arange(used.shape[0])
     points = points[used]
     triangles = remap[triangles]
 
-    mesh = MeshTri(points.T, triangles.T.astype(np.int64))
+    mesh = MeshTri(points.T.copy(), triangles.T.astype(np.int64).copy())
     boundary_nodes = np.asarray(mesh.boundary_nodes(), dtype=np.int32)
 
     tree = cKDTree(contour_points)
@@ -168,23 +212,7 @@ def assign_zone_and_region_from_radius(
     nodes: np.ndarray,
     radial_breaks: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Assign zone and region to every node directly from its radial coordinate.
-
-    Every node's zone is determined solely by comparing its r-coordinate against
-    the radial break thresholds [r0, r1, r2, r3, r4, r5].  No nearest-contour
-    voting is performed.
-
-    Parameters
-    ----------
-    nodes:
-        (N, 2) array of node coordinates [x, r].
-    radial_breaks:
-        1-D array of 6 radial station values [r0, r1, r2, r3, r4, r5].
-
-    Returns
-    -------
-    zone_ids, region_ids : (N,) int32 arrays
-    """
+    """Assign zone and region to every node directly from its radial coordinate."""
     r = nodes[:, 1]
     rb = radial_breaks
     zone_ids = np.empty(r.shape[0], dtype=np.int32)
