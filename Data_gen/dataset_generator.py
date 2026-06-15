@@ -123,8 +123,10 @@ def generate_dataset(
         include_derivatives=include_derivatives,
         seed=seed,
     )
+    import tqdm
     try:
-        for sample_id, offsets in enumerate(offsets_list):
+        # for sample_id, offsets in enumerate(offsets_list):
+        for sample_id, offsets in tqdm.tqdm(enumerate(offsets_list), total=len(offsets_list), desc="Generating samples"):
             # Deterministic per-sample seed without hidden random-process modifiers.
             # Uses large coprimes and an offset (1_000_003, 7_919, 97) to spread
             # seeds across the 31-bit range while remaining reproducible.

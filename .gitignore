@@ -57,9 +57,10 @@ ENV/
 *.csv
 
 # Generated dataset artifacts (regenerable outputs, not source/provenance)
-Data_gen/output/
-Data_gen/output_*/
-*.h5
+*.png
+*.jpg
+*.jpeg
+
 
 # Misc
 MPOS_Data_Download.xlsx
@@ -72,8 +73,6 @@ Expressions.xls
 *.json
 *.cdb
 
-
-Machine_Learning/Pearl15_HPT_Life/Training/Trained_models/Trained_models.xlsx
-*.pt
-*.pth
+*.h5
+*.dsco
 ANSYS/Modify_rst/Test.ipynb
