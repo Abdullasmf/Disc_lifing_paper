@@ -5,6 +5,7 @@ cross-section, built with the gmsh Python API.  Element size is graded:
   - fine at fillet / transition zone boundaries  (LC_FILLET)
   - fine at the bore inner face                  (LC_BORE)
   - fine at the rim outer face                   (LC_RIM)
+  - uniform shell around entire contour           (LC_EDGE)
   - coarser in bulk web / interior regions       (LC_BULK)
 The resulting node count varies with geometry (as in real FEM practice).
 The :class:`MeshData` exposes a ``skfem.MeshTri`` used directly for the
@@ -26,10 +27,12 @@ from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
 # Mesh size parameters (mm)
 # ---------------------------------------------------------------------------
 LC_BULK   = 2.0   # general interior / web bulk
-LC_FILLET = 0.5   # fillet / transition zone boundaries
+LC_EDGE   = 0.8   # uniform shell around the entire contour boundary
+LC_FILLET = 0.5   # fillet / transition zone boundaries (kept finer for stress)
 LC_BORE   = 1.0   # bore inner face (high hoop stress surface)
 LC_RIM    = 1.2   # rim outer face
 
+EDGE_INFLUENCE_MM   = 2.5   # depth of uniform boundary shell (just above edge_proximity_distance_mm)
 FILLET_INFLUENCE_MM = 4.0   # distance field extent around each fillet radius
 BORE_INFLUENCE_MM   = 3.0   # distance field extent inward from bore inner radius
 RIM_INFLUENCE_MM    = 3.0   # distance field extent outward from rim outer radius
@@ -101,7 +104,7 @@ def generate_mesh(
             elif any(abs(r - rf) < FILLET_INFLUENCE_MM for rf in (r1, r2, r3, r4)):
                 lc = LC_FILLET
             else:
-                lc = LC_BULK
+                lc = LC_EDGE  # default to edge size for all boundary points
             tag = gmsh.model.geo.addPoint(x, r, 0.0, lc)
             point_tags.append(tag)
 
@@ -123,11 +126,15 @@ def generate_mesh(
         # ------------------------------------------------------------------
         all_threshold_ids = []
 
-        def _add_threshold(pt_list, lc_min, dist_max):
-            if not pt_list:
+        def _add_threshold(pt_list, lc_min, dist_max, curve_list=None):
+            if not pt_list and not curve_list:
                 return
             fid = gmsh.model.mesh.field.add("Distance")
-            gmsh.model.mesh.field.setNumbers(fid, "PointsList", pt_list)
+            if pt_list:
+                gmsh.model.mesh.field.setNumbers(fid, "PointsList", pt_list)
+            if curve_list:
+                gmsh.model.mesh.field.setNumbers(fid, "CurvesList", curve_list)
+                gmsh.model.mesh.field.setNumber(fid, "Sampling", 20)
             tid = gmsh.model.mesh.field.add("Threshold")
             gmsh.model.mesh.field.setNumber(tid, "InField",  fid)
             gmsh.model.mesh.field.setNumber(tid, "SizeMin",  lc_min)
@@ -136,7 +143,22 @@ def generate_mesh(
             gmsh.model.mesh.field.setNumber(tid, "DistMax",  dist_max)
             all_threshold_ids.append(tid)
 
-        # Fillet zone boundaries (r1, r2, r3, r4)
+        # ------------------------------------------------------------------
+        # 3a. Uniform boundary shell: LC_EDGE across ALL contour lines.
+        #     This ensures bore/rim flat faces are as dense as the web walls.
+        #     Influence depth = EDGE_INFLUENCE_MM (just above edge_proximity_distance_mm).
+        # ------------------------------------------------------------------
+        _add_threshold(
+            pt_list=[],
+            lc_min=LC_EDGE,
+            dist_max=EDGE_INFLUENCE_MM,
+            curve_list=line_tags,
+        )
+
+        # ------------------------------------------------------------------
+        # 3b. Fillet zone boundaries (r1, r2, r3, r4) — kept finer than LC_EDGE
+        #     for stress concentration resolution.
+        # ------------------------------------------------------------------
         for rf in (r1, r2, r3, r4):
             pts = [
                 point_tags[i]
@@ -145,7 +167,9 @@ def generate_mesh(
             ]
             _add_threshold(pts, LC_FILLET, FILLET_INFLUENCE_MM * 2.0)
 
-        # Bore inner face (r ~ r0)
+        # ------------------------------------------------------------------
+        # 3c. Bore inner face (r ~ r0) — high hoop stress region.
+        # ------------------------------------------------------------------
         bore_pts = [
             point_tags[i]
             for i, (_, r) in enumerate(contour_points)
@@ -153,7 +177,9 @@ def generate_mesh(
         ]
         _add_threshold(bore_pts, LC_BORE, BORE_INFLUENCE_MM * 2.0)
 
-        # Rim outer face (r ~ r5)
+        # ------------------------------------------------------------------
+        # 3d. Rim outer face (r ~ r5).
+        # ------------------------------------------------------------------
         rim_pts = [
             point_tags[i]
             for i, (_, r) in enumerate(contour_points)
