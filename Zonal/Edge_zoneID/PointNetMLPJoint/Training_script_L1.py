@@ -1109,6 +1109,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         mlp_hidden=head_hidden,
         out_dim=NUM_TARGETS,
         encoder_cfg=encoder_cfg,
+        in_channels=len(INPUT_COLS),
     )
     parameter_count = sum(p.numel() for p in model.parameters())
     print(f"Model parameter count: {parameter_count:,}")
