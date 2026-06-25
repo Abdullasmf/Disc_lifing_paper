@@ -42,6 +42,11 @@ def target_cols_for_width(width: int) -> Tuple[int, ...]:
 
     Returns both when NUM_TARGETS == 2, else only the life column.
     """
+    min_width = max(QUERY_COLS) + 1 + NUM_TARGETS
+    if width < min_width:
+        raise RuntimeError(
+            f"Tensor width {width} too small for {NUM_TARGETS} target(s) appended after QUERY_COLS={QUERY_COLS}."
+        )
     stress_col = width - 2
     life_col = width - 1
     if NUM_TARGETS == 2:
