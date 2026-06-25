@@ -70,7 +70,7 @@ Partnumbers_SAP_DATA_with_longtext.xlsx
 DesignPointLog.csv
 memory_reduction/
 Expressions.xls
-*.json
+
 *.cdb
 
 *.h5
