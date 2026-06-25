@@ -2,9 +2,9 @@ import random
 import json
 import hashlib
 from typing import List, Tuple, Dict, Optional, Any
+import numpy as np
 
 import h5py
-import numpy as np
 import os
 import time
 from pathlib import Path
@@ -29,6 +29,109 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
 TARGET_COLS: Tuple[int, int] = (2, 4)  # [x, y, stress, temp, log(life)]
 NUM_TARGETS: int = len(TARGET_NAMES)
+
+
+def life_weight_fn(
+    life_values: torch.Tensor,
+    gamma: float = 0.5,
+    w_min: float = 0.5,
+    w_max: float = 5.0,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """
+    Compute clipped inverse-life weights to emphasize low-life nodes.
+    
+    w(y) = clip( (y_ref / (y + eps))^gamma, w_min, w_max )
+    
+    Args:
+        life_values: [N] or [B, K] raw life values (unnormalized, physical units)
+        gamma: exponent controlling weight intensity (0.3-0.7 recommended)
+        w_min: minimum weight clipping
+        w_max: maximum weight clipping
+        eps: small value to avoid division by zero
+    
+    Returns:
+        weights: same shape as life_values, clipped in [w_min, w_max]
+    """
+    # Use median as reference (robust to outliers)
+    y_ref = torch.median(life_values.view(-1))
+    y_ref = torch.clamp(y_ref, min=eps)
+    
+    # Inverse scaling: low y → high weight
+    w = (y_ref / (torch.clamp(life_values, min=eps))) ** gamma
+    w = torch.clamp(w, min=w_min, max=w_max)
+    return w
+
+
+def weighted_smooth_l1_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: Optional[torch.Tensor] = None,
+    target_raw: Optional[torch.Tensor] = None,
+    target_std: Optional[torch.Tensor] = None,
+    use_life_weights: bool = False,
+    life_indices: Optional[List[int]] = None,
+    weight_per_target: Optional[List[float]] = None,
+    beta: float = 1.0,
+    gamma: float = 0.5,
+    w_min: float = 0.5,
+    w_max: float = 5.0,
+) -> torch.Tensor:
+    """
+    Compute weighted SmoothL1 (Huber) loss with optional per-target and life-based weighting.
+    
+    Args:
+        pred: [B, K, 2] or [N, 2] predictions (standardized)
+        target: [B, K, 2] or [N, 2] targets (standardized)
+        mask: [B, K, 1] or [N, 1] binary mask (1 for real, 0 for pad)
+        target_raw: [B, K, 2] or [N, 2] raw targets (physical units) for computing life weights
+        target_std: [2] standard deviations for denormalization
+        use_life_weights: if True, weight nodes by inverse life (low life → high weight)
+        life_indices: [1] index of LogLife in target (default [1])
+        weight_per_target: [2] weights for [Stress, LogLife]
+        beta: Huber loss beta parameter (transition point from L2 to L1)
+        gamma: life weighting exponent
+        w_min, w_max: weight clipping bounds
+    
+    Returns:
+        scalar loss
+    """
+    if life_indices is None:
+        life_indices = [1]  # LogLife
+    if weight_per_target is None:
+        weight_per_target = [1.0, 1.0]  # equal weights
+    
+    diff = pred - target
+    huber_loss = torch.nn.functional.smooth_l1_loss(
+        diff, torch.zeros_like(diff), beta=beta, reduction="none"
+    )  # [B, K, 3] or [N, 3]
+    
+    # Per-target weights
+    target_weights = torch.tensor(
+        weight_per_target, dtype=huber_loss.dtype, device=huber_loss.device
+    ).view(1, 1, 2)  # [1, 1, 2]
+    weighted_loss = huber_loss * target_weights
+    
+    # Life-based node weighting
+    if use_life_weights and target_raw is not None and target_std is not None:
+        # Denormalize life targets to physical units
+        target_std_view = target_std.view(1, 1, -1)
+        life_phys = target_raw[..., life_indices] * target_std_view[..., life_indices]
+        # Compute weights from critical (minimum) life
+        critical_life = torch.min(life_phys, dim=-1, keepdim=True)[0]  # [B/N, K/1, 1]
+        node_weights = life_weight_fn(critical_life, gamma=gamma, w_min=w_min, w_max=w_max)
+        # Apply node weights across all targets
+        weighted_loss = weighted_loss * node_weights  # broadcast [B, K, 1]
+    
+    # Mask out padded nodes
+    if mask is not None:
+        weighted_loss = weighted_loss * mask.to(weighted_loss.dtype)
+        denom = torch.clamp(mask.sum(), min=1.0)
+    else:
+        denom = torch.tensor(1.0, dtype=weighted_loss.dtype, device=weighted_loss.device)
+    
+    return weighted_loss.sum() / denom
+
 
 def load_h5_pointsets(path: Path) -> List[torch.Tensor]:
     """
@@ -312,7 +415,20 @@ def train(
     use_amp: bool = False,
     resume_checkpoint: Optional[Dict] = None,
     model_name: Optional[str] = None,
+    use_weighted_loss: bool = False,
+    weight_per_target: Optional[List[float]] = None,
+    life_weight_gamma: float = 0.5,
+    life_weight_clip: Tuple[float, float] = (0.5, 5.0),
 ) -> None:
+    if weight_per_target is None:
+        weight_per_target = [1.0, 1.0]
+    
+    print(f"Loss config: use_weighted_loss={use_weighted_loss}, weight_per_target={weight_per_target}")
+    if use_weighted_loss:
+        print(
+            f"  life_weight_gamma={life_weight_gamma}, w_clip={life_weight_clip}"
+        )
+    
     model = model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and use_amp))
@@ -430,14 +546,34 @@ def train(
                         f"Model/data mismatch: pred has {pred_z.shape[-1]} outputs but target has {target_z.shape[-1]}"
                     )
 
-                diff2 = (pred_z - target_z) ** 2
-                if isinstance(node_mask, torch.Tensor):
-                    mask = node_mask.to(diff2.dtype)
-                    denom = torch.clamp(mask.sum() * diff2.shape[-1], min=1.0)
-                    loss = (diff2 * mask).sum() / denom
-                    Bmul = int(node_mask.sum().item())
+                # Use weighted loss if enabled, else plain L1
+                if use_weighted_loss:
+                    # Reconstruct raw targets for life weighting
+                    target_z_raw = None
+                    if "target_raw" in batch:
+                        target_z_raw = batch["target_raw"].to(device)
+                    loss = weighted_smooth_l1_loss(
+                        pred_z,
+                        target_z,
+                        mask=node_mask,
+                        target_raw=target_z_raw,
+                        target_std=target_std.to(device),
+                        use_life_weights=True,
+                        weight_per_target=weight_per_target,
+                        gamma=life_weight_gamma,
+                        w_min=life_weight_clip[0],
+                        w_max=life_weight_clip[1],
+                    )
                 else:
-                    loss = diff2.mean()
+                    # Plain L1 baseline
+                    abs_diff = (pred_z - target_z).abs()
+                    if isinstance(node_mask, torch.Tensor):
+                        mask = node_mask.to(abs_diff.dtype)
+                        denom = torch.clamp(mask.sum() * abs_diff.shape[-1], min=1.0)
+                        loss = (abs_diff * mask).sum() / denom
+                        Bmul = int(node_mask.sum().item())
+                    else:
+                        loss = abs_diff.mean()
 
             scaler.scale(loss).backward()
             if grad_clip_norm is not None:
@@ -469,6 +605,11 @@ def train(
         sum_y = torch.zeros(n_targets, dtype=torch.float64)
         sum_y2 = torch.zeros(n_targets, dtype=torch.float64)
 
+        # Life-quantile tracking (for low-life accuracy)
+        life_quantiles = [0.25, 0.5, 0.75]
+        life_se_by_quantile = {q: torch.zeros(n_targets, dtype=torch.float64) for q in life_quantiles}
+        life_count_by_quantile = {q: 0 for q in life_quantiles}
+
         count_val_points = 0
 
         with torch.no_grad():
@@ -489,7 +630,7 @@ def train(
                         f"Model/data mismatch in validation: pred has {pred.shape[-1]} outputs but target has {target.shape[-1]}"
                     )
 
-                loss = (pred - target).pow(2).mean()
+                loss = (pred - target).abs().mean()
                 val_loss += loss.item() * N
 
                 target_std_v = target_std_d.view(1, -1)
@@ -510,6 +651,16 @@ def train(
                 se_sum += torch.sum(d**2, dim=0).double().cpu()
                 sum_y += torch.sum(true_raw, dim=0).double().cpu()
                 sum_y2 += torch.sum(true_raw**2, dim=0).double().cpu()
+
+                # Track by life quantile using log-life target
+                critical_life = true_raw[:, 1]
+                for q in life_quantiles:
+                    threshold = torch.quantile(critical_life, q)
+                    below_q = critical_life <= threshold
+                    if below_q.any():
+                        se_below = torch.sum((d[below_q] ** 2), dim=0).double().cpu()
+                        life_se_by_quantile[q] += se_below
+                        life_count_by_quantile[q] += int(below_q.sum().item())
 
                 count_val_points += int(N)
                 nval += N
@@ -536,9 +687,19 @@ def train(
             metric_parts.append(f"MSE({name}): {mse_j:.2f}")
         metrics_str = " | ".join(metric_parts)
 
+        # Life-quantile metrics
+        life_metrics_parts: List[str] = []
+        for q in life_quantiles:
+            if life_count_by_quantile[q] > 0:
+                mse_q = (life_se_by_quantile[q] / life_count_by_quantile[q]).tolist()
+                mse_q_avg = float(np.mean(mse_q))
+                life_metrics_parts.append(f"MSE(life<{int(q*100)}th%): {mse_q_avg:.2f}")
+        life_metrics_str = " | ".join(life_metrics_parts) if life_metrics_parts else "(no quantile data)"
+
         print(
             f"Ep {epoch:03d} | L_tot: {train_loss:.4f}/{val_loss:.4f} | {metrics_str} | lr: {scheduler.get_last_lr()[0]:.2e} | {epoch_dt:.1f}s"
         )
+        print(f"         | Life quantiles: {life_metrics_str}")
 
         val_mse_map = {name: float(mse_j) for name, mse_j in zip(target_names, val_mse)}
         val_r2_map = {name: float(r2_j) for name, r2_j in zip(target_names, r2_vals)}
@@ -566,7 +727,7 @@ def train(
                 and epochs_since_improve >= early_stopping_patience
             ):
                 print(
-                    f"Early stopping triggered after {epochs_since_improve} epochs without improvement. Best val MSE: {best_val:.6f}"
+                    f"Early stopping triggered after {epochs_since_improve} epochs without improvement. Best val loss: {best_val:.6f}"
                 )
                 break
 
@@ -587,6 +748,10 @@ def train(
                 "config": {
                     "epochs_trained": epoch,
                     "best_val": best_val,
+                    "use_weighted_loss": use_weighted_loss,
+                    "weight_per_target": weight_per_target,
+                    "life_weight_gamma": life_weight_gamma,
+                    "life_weight_clip": life_weight_clip,
                 },
             }
             # Convenience for validators expecting this key name
@@ -595,7 +760,7 @@ def train(
             print(f"Saved checkpoint to: {save_path}")
 
     dt = time.time() - t0
-    print(f"Training finished in {dt/60:.1f} min. Best val MSE: {best_val:.6f}")
+    print(f"Training finished in {dt/60:.1f} min. Best val loss: {best_val:.6f}")
 
 
 def main(preset_name: str = "S0", batch=8) -> None:
@@ -617,7 +782,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
     grandparent_dir = parent_dir.parent
     repo_dir = grandparent_dir.parent
     h5_dir = Path(repo_dir, "Data_gen", "output")
-    h5py_path = Path(h5_dir, "disc_dataset_edge_deriv_zonal.h5")
+    h5py_path = Path(h5_dir, "disc_dataset_edge_deriv_uniform.h5")
     if not h5py_path.exists():
         raise FileNotFoundError(
             f"HDF5 file not found at {h5py_path}. Please ensure the data generation step has been completed and the file is in the expected location."
@@ -700,7 +865,16 @@ def main(preset_name: str = "S0", batch=8) -> None:
     ).hexdigest()[:8]
     save_dir = Path(project_dir, "Trained_models")
     base_name = model_name if model_name else "pnmlp"
-    save_path = save_dir / f"{base_name}_{arch_hash}.pt"
+    
+    # Load loss config from preset if available
+    use_weighted_loss_cfg = _cfg.get("use_weighted_loss", False)
+    weight_per_target_cfg = _cfg.get("weight_per_target", [1.0, 1.0])
+    life_weight_gamma_cfg = float(_cfg.get("life_weight_gamma", 0.5))
+    life_weight_clip_cfg = tuple(_cfg.get("life_weight_clip", [0.5, 5.0]))
+    
+    # Include loss config in filename for easy identification
+    loss_suffix = "_L1_weighted" if use_weighted_loss_cfg else "_L1"
+    save_path = save_dir / f"{base_name}_{arch_hash}{loss_suffix}.pt"
 
     resume_checkpoint = None
     if save_path.exists():
@@ -708,7 +882,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         try:
             resume_checkpoint = torch.load(save_path, map_location="cpu")
             print("Checkpoint loaded successfully.")
-        except Exception as e:
+        except (RuntimeError, EOFError, ValueError) as e:
             print(f"Failed to load checkpoint: {e}. Starting fresh.")
             resume_checkpoint = None
     else:
@@ -737,9 +911,6 @@ def main(preset_name: str = "S0", batch=8) -> None:
         target_mean = resume_checkpoint["target_mean"]
         target_std = resume_checkpoint["target_std"]
 
-    print(
-        "Using per-target z-score normalization so Stress (~200-1200) and LogLife (~3-7) are balanced during training."
-    )
     print(
         f"Coord center={coord_center.numpy()}, half_range={coord_half_range.numpy()} | target_mean={target_mean.numpy()}, target_std={target_std.numpy()}"
     )
@@ -839,8 +1010,8 @@ def main(preset_name: str = "S0", batch=8) -> None:
         out_dim=NUM_TARGETS,
         encoder_cfg=encoder_cfg,
     )
-    param_count = sum(p.numel() for p in model.parameters())
-    print(f"Model initialized with {param_count:,} parameters.")
+    parameter_count = sum(p.numel() for p in model.parameters())
+    print(f"Model parameter count: {parameter_count:,}")
     if resume_checkpoint is not None:
         try:
             model.load_state_dict(resume_checkpoint["model_state"], strict=True)
@@ -873,12 +1044,16 @@ def main(preset_name: str = "S0", batch=8) -> None:
         use_amp=(device.type == "cuda"),
         resume_checkpoint=resume_checkpoint,
         model_name=model_name,
+        use_weighted_loss=use_weighted_loss_cfg,
+        weight_per_target=weight_per_target_cfg,
+        life_weight_gamma=life_weight_gamma_cfg,
+        life_weight_clip=life_weight_clip_cfg,
     )
 
 
 if __name__ == "__main__":
     try:
-        main("S_full_ln_pos12", 1)
+        main("S0", 8)
     except Exception as e:
         print(f"Error during training: {e}")
         raise

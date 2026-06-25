@@ -617,7 +617,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
     grandparent_dir = parent_dir.parent
     repo_dir = grandparent_dir.parent
     h5_dir = Path(repo_dir, "Data_gen", "output")
-    h5py_path = Path(h5_dir, "disc_dataset_edge_deriv_zonal.h5")
+    h5py_path = Path(h5_dir, "disc_dataset_edge_deriv_uniform.h5")
     if not h5py_path.exists():
         raise FileNotFoundError(
             f"HDF5 file not found at {h5py_path}. Please ensure the data generation step has been completed and the file is in the expected location."

@@ -1,25 +1,26 @@
-import os
 import sys
 import time
-import json
 import argparse
+import json
 import torch
 from pathlib import Path
 
-
+# # Pin this process to GPU 0 BEFORE importing training_script (which selects device at import time)
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Ensure directory is on path for import resolution
 this_dir = Path(__file__).parent.resolve()
 if str(this_dir) not in sys.path:
     sys.path.insert(0, str(this_dir))
 
-from Training_script import main as train_main  # noqa: E402
+from Training_script_L1 import main as train_main  # noqa: E402
 
 
 PRESETS_GPU0 = [
-    "M",
-    "S",
-    "L",
+    "M_full_ln_pos12_weighted_lowlife_boost",
+    "M_full_ln_pos12_weighted_lowlife_extreme",
+    "S_full_ln_pos12_weighted_lowlife_extreme",
+    "S_full_ln_pos12_weighted_lowlife_boost",
 ]
 
 
@@ -28,7 +29,6 @@ def run_with_fallback(preset: str, initial_batch: int) -> bool:
     iterative = max(1, int(initial_batch * 0.1))
     batch_plan = list(range(initial_batch, 0, -iterative))
     batch_plan.append(1)
-    batch_plan = [1]
     for b in batch_plan:
         try:
             print(f"\n[GPU0] Preset={preset} | Trying batch={b}")
@@ -63,13 +63,13 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Preset name(s) to run. Use one or many values, or comma-separated values. "
-            "Use 'all' to run all presets in the JSON file."
+            "Use 'all' to run all presets in this file."
         ),
     )
     parser.add_argument(
         "--initial-batch",
         type=int,
-        default=200,
+        default=40,
         help="Initial batch size to try before fallback reductions.",
     )
     parser.add_argument(
@@ -133,13 +133,9 @@ def main() -> None:
     if args.initial_batch < 1:
         raise ValueError("--initial-batch must be >= 1")
 
-    print("Starting GPU0 preset run set...")
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = Path(project_dir).parent  # parent folder name is model name
-    model_name = parent_dir.name
-    print(model_name)
-
     selected_presets = resolve_requested_presets(args.preset, available_presets)
+
+    print("Starting GPU0 preset run set...")
     for preset in selected_presets:
         run_with_fallback(preset, initial_batch=args.initial_batch)
     print("GPU0 run set finished.")

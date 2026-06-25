@@ -1,7 +1,7 @@
 import random
 import json
 import hashlib
-from typing import List, Tuple, Dict, Optional, Any
+from typing import List, Tuple, Dict, Optional
 
 import h5py
 import numpy as np
@@ -15,13 +15,14 @@ import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 
-from pn_models import PointNetMLPJoint
+from benchmarks import ArGEnTDeepONet
 
 project_dir = (
     os.path.dirname(os.path.abspath(__file__))
     if "__file__" in globals()
     else os.getcwd()
 )
+parent_dir = Path(project_dir).parent
 
 # Defer device prints and data loading to main() to avoid re-exec in worker processes
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,6 +30,26 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
 TARGET_COLS: Tuple[int, int] = (2, 4)  # [x, y, stress, temp, log(life)]
 NUM_TARGETS: int = len(TARGET_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# SDF computation helpers (used when SDF is not pre-stored in HDF5)
+# ---------------------------------------------------------------------------
+
+def _dist_point_to_segment_batch(
+    px: np.ndarray, py: np.ndarray,
+    ax: float, ay: float, bx: float, by: float,
+) -> np.ndarray:
+    dx, dy = bx - ax, by - ay
+    len2 = dx * dx + dy * dy
+    if len2 < 1e-12:
+        return np.hypot(px - ax, py - ay)
+    t = np.clip(((px - ax) * dx + (py - ay) * dy) / len2, 0.0, 1.0)
+    return np.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+
+
 
 def load_h5_pointsets(path: Path) -> List[torch.Tensor]:
     """
@@ -92,12 +113,12 @@ def load_h5_pointsets(path: Path) -> List[torch.Tensor]:
 # Loaded in main()
 
 
-class GeomLifeDataset(Dataset):
+class GeomStressDataset(Dataset):
     """
     Geometry-level dataset. Each item is one simulation geometry with variable number of points.
-
     x: [N,2] coordinates, y: [N,2] = [Stress, LogLife].
     Applies global normalization using provided stats.
+    Tensors have layout (x, y, stress, temp, log(life)) -> shape [N, 5].
     """
 
     def __init__(
@@ -118,7 +139,7 @@ class GeomLifeDataset(Dataset):
             required_cols = max(TARGET_COLS) + 1
             if t.shape[1] < required_cols:
                 raise ValueError(
-                    "Each tensor must be [N,5]: x,y,stress,temp,log(life)"
+                    "Each tensor must have shape [N,5]: x,y,stress,temp,log(life)"
                 )
             xy = t[:, :2].contiguous()
             target = t[:, list(TARGET_COLS)].contiguous()
@@ -128,17 +149,17 @@ class GeomLifeDataset(Dataset):
         return len(self.items)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        xy, s = self.items[idx]
+        xy, target = self.items[idx]
         # Normalize with GLOBAL stats computed from training set
         xyn = (xy - self.coord_center) / self.coord_half_range
-        # s is [N,2], target_mean/std are [2]
-        zn = (s - self.target_mean) / self.target_std
+        target_n = (target - self.target_mean) / self.target_std
+        # Points: only (x, y) normalized – no SDF for self-attention variant
         return {
-            "points": xyn,  # [N,2]
-            "target": zn,  # [N,2] standardized (Stress, LogLife)
+            "points": xyn,   # [N, 2]
+            "target": target_n,    # [N, 2] => [Stress, LogLife]
             # Provide also unnormalized for potential analysis if needed
             "points_raw": xy,
-            "target_raw": s,  # [N,2] raw (Stress, LogLife)
+            "target_raw": target,
         }
 
 
@@ -182,7 +203,7 @@ class DualSamplerCollate:
     Returns dict with keys:
       - 'geom_points': [B,K_enc,2]
       - 'query_points': [B,K_q,2]
-        - 'target': [B,K_q,2]
+            - 'target': [B,K_q,2]
     """
 
     def __init__(self, k_enc: int, k_q: int) -> None:
@@ -220,68 +241,61 @@ class DualSamplerCollate:
 class AllNodesPadCollate:
     """Pickle-safe collate that uses ALL nodes per geometry.
 
-    Pads each geometry in the batch to the maximum node count by repeating valid indices
-    (no zero-padding), and returns a dual-set dict compatible with the model forward:
-      - 'geom_points': [B,maxN,2]
-      - 'query_points': [B,maxN,2]
-        - 'target': [B,maxN,2]
-            - 'mask': [B,maxN,1] with 1 for real nodes and 0 for repeated pad slots
+    Pads smaller point clouds in the batch with zeros up to maxN and returns a
+    boolean mask of shape [B, maxN] (True for real points, False for padded zeros):
+      - 'geom_points': [B,maxN,C]
+      - 'query_points': [B,maxN,C]
+            - 'target': [B,maxN,2]
+      - 'mask': [B,maxN] bool, True=real point, False=zero-padded
     """
 
     def __call__(self, batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         Ns = [item["points"].shape[0] for item in batch]
         maxN = max(Ns)
+        C = batch[0]["points"].shape[1]
         gp_b: List[torch.Tensor] = []
         qp_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         mask_b: List[torch.Tensor] = []
         for item, N in zip(batch, Ns):
-            pts = item["points"]  # [N,2]
-            target = item["target"]  # [N,2]
-            idx_all = torch.arange(N)
+            pts = item["points"]  # [N, C]
+            target = item["target"]    # [N, 2]
             if N < maxN:
-                extra = torch.randint(0, N, (maxN - N,))
-                enc_idx = torch.cat([idx_all, extra], dim=0)
-                qry_idx = enc_idx
-                mask = torch.cat(
-                    [torch.ones(N, dtype=torch.float32), torch.zeros(maxN - N, dtype=torch.float32)],
-                    dim=0,
-                )
+                pad = maxN - N
+                pts_pad = torch.cat([pts, torch.zeros(pad, C, dtype=pts.dtype)], dim=0)
+                target_pad = torch.cat([target, torch.zeros(pad, target.shape[1], dtype=target.dtype)], dim=0)
             else:
-                enc_idx = idx_all
-                qry_idx = idx_all
-                mask = torch.ones(maxN, dtype=torch.float32)
-            gp_b.append(pts[enc_idx])
-            qp_b.append(pts[qry_idx])
-            t_b.append(target[qry_idx])
-            mask_b.append(mask.unsqueeze(-1))
+                pts_pad = pts
+                target_pad = target
+            m = torch.zeros(maxN, dtype=torch.bool)
+            m[:N] = True
+            gp_b.append(pts_pad)
+            qp_b.append(pts_pad)
+            t_b.append(target_pad)
+            mask_b.append(m)
         return {
             "geom_points": torch.stack(gp_b, dim=0),
             "query_points": torch.stack(qp_b, dim=0),
             "target": torch.stack(t_b, dim=0),
-            "mask": torch.stack(mask_b, dim=0),  # [B,maxN,1]
+            "mask": torch.stack(mask_b, dim=0),  # [B, maxN] bool
         }
 
 
 def compute_global_normalization(
     train_tensors: List[torch.Tensor],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Compute coord center/half-range and target (Stress, LogLife) mean/std from training set.
+    """Compute coord center/half-range and target (Stress, LogLife) mean/std from training set.
 
-    Expects each tensor row as [x, y, stress, temp, log(life)].
+    Tensors have layout (x, y, stress, temp, log(life)) -> shape [N, 5].
     """
-    all_xy = torch.cat([t[:, :2] for t in train_tensors], dim=0)
+    all_xy = torch.cat([t[:, :2]  for t in train_tensors], dim=0)
     all_targets = torch.cat([t[:, list(TARGET_COLS)] for t in train_tensors], dim=0)
-
     xy_min = all_xy.min(dim=0).values
     xy_max = all_xy.max(dim=0).values
-    coord_center = 0.5 * (xy_min + xy_max)
+    coord_center     = 0.5 * (xy_min + xy_max)
     coord_half_range = torch.clamp(0.5 * (xy_max - xy_min), min=1e-6)
-
     target_mean = all_targets.mean(dim=0)
     target_std = all_targets.std(dim=0, unbiased=False).clamp(min=1e-6)
-
     return coord_center, coord_half_range, target_mean, target_std
 
 
@@ -310,36 +324,14 @@ def train(
     early_stopping_patience: Optional[int] = 20,
     early_stopping_min_delta: float = 0.0,
     use_amp: bool = False,
-    resume_checkpoint: Optional[Dict] = None,
-    model_name: Optional[str] = None,
 ) -> None:
     model = model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and use_amp))
+    scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and use_amp))
     best_val = float("inf")
-    start_epoch = 1
-    history: List[Dict[str, Any]] = []
-
-    if resume_checkpoint is not None:
-        print("Resuming training from checkpoint...")
-        model.load_state_dict(resume_checkpoint["model_state"])
-        if "config" in resume_checkpoint:
-            start_epoch = resume_checkpoint["config"].get("epochs_trained", 0) + 1
-            best_val = resume_checkpoint["config"].get("best_val", float("inf"))
-        # Fallback for legacy keys
-        if best_val == float("inf") and "best_val_loss" in resume_checkpoint:
-            best_val = resume_checkpoint["best_val_loss"]
-        if "optimizer_state" in resume_checkpoint:
-            optimizer.load_state_dict(resume_checkpoint["optimizer_state"])
-        if "scaler_state" in resume_checkpoint:
-            scaler.load_state_dict(resume_checkpoint["scaler_state"])
-        if isinstance(resume_checkpoint.get("history"), list):
-            history = list(resume_checkpoint["history"])
-        print(f"Resumed state: start_epoch={start_epoch}, best_val={best_val:.6f}")
-
     # For raw-space validation logging
-    target_mean_d = target_mean.to(device)  # [2]
-    target_std_d = target_std.to(device)  # [2]
+    target_mean_d = target_mean.to(device)
+    target_std_d = target_std.to(device)
 
     # Learning rate schedule (optional OneCycleLR based on rough steps)
     steps_per_epoch = max(1, len(train_loader))
@@ -348,64 +340,83 @@ def train(
         max_lr=lr,
         epochs=epochs,
         steps_per_epoch=steps_per_epoch,
-        pct_start=0.1,
+        pct_start=0.3,
         div_factor=10.0,
         final_div_factor=10.0,
         anneal_strategy="cos",
         three_phase=False,
     )
 
-    if resume_checkpoint is not None and "scheduler_state" in resume_checkpoint:
-        try:
-            scheduler.load_state_dict(resume_checkpoint["scheduler_state"])
-        except (KeyError, ValueError, RuntimeError) as exc:
-            print(f"Warning: failed to restore scheduler state: {exc}")
-
     t0 = time.time()
     epochs_since_improve = 0
+    start_epoch = 1
+    train_history: list = []
+
+    # Resume from checkpoint if the file already exists
+    if save_path is not None and Path(save_path).exists():
+        print(f"Found existing checkpoint at {save_path}. Resuming training...")
+        try:
+            resume_ckpt = torch.load(str(save_path), map_location=device, weights_only=False)
+            model.load_state_dict(resume_ckpt["model_state"])
+            if "optimizer_state" in resume_ckpt:
+                optimizer.load_state_dict(resume_ckpt["optimizer_state"])
+            if "scheduler_state" in resume_ckpt:
+                scheduler.load_state_dict(resume_ckpt["scheduler_state"])
+            if "scaler_state" in resume_ckpt:
+                scaler.load_state_dict(resume_ckpt["scaler_state"])
+            best_val = resume_ckpt.get("best_val_loss", float("inf"))
+            epochs_since_improve = resume_ckpt.get("epochs_since_improve", 0)
+            start_epoch = resume_ckpt.get("config", {}).get("epochs_trained", 0) + 1
+            print(
+                f"Resumed: best_val={best_val:.6f}, start_epoch={start_epoch}, "
+                f"epochs_since_improve={epochs_since_improve}"
+            )
+            train_history = resume_ckpt.get("train_history", [])
+        except (KeyError, RuntimeError, ValueError) as exc:
+            print(f"Checkpoint incompatible ({exc}). Starting fresh.")
+
     for epoch in range(start_epoch, epochs + 1):
         epoch_t0 = time.time()
         model.train()
         train_loss = 0.0
-        ntrain = 0.0
+        ntrain = 0
         for batch in train_loader:
-            node_mask: Optional[torch.Tensor] = None
+            pad_mask: Optional[torch.Tensor] = None
             if "geom_points" in batch:
                 # Dual-sampling batched mode
                 gp: torch.Tensor = batch["geom_points"].to(device)  # [B,Kenc,2]
                 query_xy: torch.Tensor = batch["query_points"].to(device)  # [B,Kq,2]
-                target_z: torch.Tensor = batch["target"].to(
-                    device
-                )  # [B,Kq,2] standardized (Stress, LogLife)
+                target: torch.Tensor = batch["target"].to(device)  # [B,Kq,2] [Stress, LogLife]
                 B, Kq, _ = query_xy.shape
                 Bmul = B * Kq
+                # Extract zero-padding mask from batched_all collate
                 if "mask" in batch:
-                    node_mask = batch["mask"].to(device)  # [B,Kq,1]
+                    pad_mask = batch["mask"].to(device)  # [B, maxN] bool
             else:
                 # Full-geometry single/batched mode from earlier
-                pts: torch.Tensor = batch["points"].to(device)  # [N,2] or [B,K,2]
-                target: torch.Tensor = batch["target"].to(device)  # [N,2] or [B,K,2]
+                pts: torch.Tensor = batch["points"].to(device)  # [N,2] or [B,K,2] — fallback path (train_mode != batched_all)
+                targets: torch.Tensor = batch["target"].to(device)  # [N,2] or [B,K,2]
                 if pts.dim() == 2:
                     # Single geometry
                     N = pts.shape[0]
                     if max_points_per_geom is None:
                         query_xy = pts
-                        target_z = target
+                        target = targets
                     else:
                         q = min(N, max_points_per_geom)
                         idxs = torch.randperm(N, device=device)[:q]
                         query_xy = pts[idxs]
-                        target_z = target[idxs]
+                        target = targets[idxs]
                     gp = pts.unsqueeze(0)  # [1,N,2]
                     query_xy = query_xy.unsqueeze(0)  # [1,q,2] or [1,N,2]
-                    target_z = target_z.unsqueeze(0)
+                    target = target.unsqueeze(0)
                     Bmul = query_xy.shape[1]
                 else:
                     # Batched [B,K,*]
                     B, K, _ = pts.shape
                     if max_points_per_geom is None or max_points_per_geom >= K:
                         query_xy = pts
-                        target_z = target
+                        target = targets
                         Bmul = B * K
                     else:
                         q = max_points_per_geom
@@ -418,44 +429,40 @@ def train(
                             torch.arange(B, device=device).unsqueeze(-1).expand(-1, q)
                         )
                         query_xy = pts[bidx, idxs, :]
-                        target_z = target[bidx, idxs, :]
+                        target = targets[bidx, idxs, :]
                         Bmul = B * q
                     gp = pts  # use same points for encoder
 
             optimizer.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and use_amp)):
-                pred_z = model(gp, query_xy)  # [B,Kq,2] standardized
-                if pred_z.shape[-1] != target_z.shape[-1]:
+            with torch.amp.autocast(
+                "cuda", enabled=(device.type == "cuda" and use_amp)
+            ):
+                pred = model(gp, query_xy, pad_mask)  # [B,Kq,2]
+                if pred.shape[-1] != target.shape[-1]:
                     raise RuntimeError(
-                        f"Model/data mismatch: pred has {pred_z.shape[-1]} outputs but target has {target_z.shape[-1]}"
+                        f"Model/data mismatch: pred has {pred.shape[-1]} outputs but target has {target.shape[-1]}"
                     )
+                diff2 = (pred - target) ** 2
 
-                diff2 = (pred_z - target_z) ** 2
-                if isinstance(node_mask, torch.Tensor):
-                    mask = node_mask.to(diff2.dtype)
-                    denom = torch.clamp(mask.sum() * diff2.shape[-1], min=1.0)
+                # Unweighted loss with mask support for padded nodes.
+                if pad_mask is not None:
+                    mask = pad_mask.unsqueeze(-1).to(diff2.dtype)
+                    denom = (mask.sum() * diff2.shape[-1]).clamp(min=1.0)
                     loss = (diff2 * mask).sum() / denom
-                    Bmul = int(node_mask.sum().item())
                 else:
                     loss = diff2.mean()
+
 
             scaler.scale(loss).backward()
             if grad_clip_norm is not None:
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
-
             scaler.step(optimizer)
-
-            # Only step scheduler if optimizer step was not skipped (scale didn't decrease)
-            scale_before = scaler.get_scale()
             scaler.update()
-            scale_after = scaler.get_scale()
-
-            if scale_after >= scale_before:
-                scheduler.step()
+            scheduler.step()
 
             train_loss += loss.item() * Bmul
-            ntrain += float(Bmul)
+            ntrain += Bmul
 
         train_loss /= max(1, ntrain)
 
@@ -468,27 +475,20 @@ def train(
         se_sum = torch.zeros(n_targets, dtype=torch.float64)
         sum_y = torch.zeros(n_targets, dtype=torch.float64)
         sum_y2 = torch.zeros(n_targets, dtype=torch.float64)
-
         count_val_points = 0
-
         with torch.no_grad():
             for batch in val_loader:
-                pts: torch.Tensor = batch["points"].to(device)  # [N,2]
-                target: torch.Tensor = batch["target"].to(
-                    device
-                )  # [N,2] standardized [Stress, LogLife]
+                pts: torch.Tensor = batch["points"].to(device)  # [N,2] (x_norm, y_norm)
+                target: torch.Tensor = batch["target"].to(device)  # [N,2] => [Stress, LogLife]
                 N = pts.shape[0]
-                with torch.cuda.amp.autocast(
-                    enabled=(device.type == "cuda" and use_amp)
+                with torch.amp.autocast(
+                    "cuda", enabled=(device.type == "cuda" and use_amp)
                 ):
-                    pred = model(pts.unsqueeze(0), pts.unsqueeze(0)).squeeze(
-                        0
-                    )  # [N,2] standardized
+                    pred = model(pts.unsqueeze(0), pts.unsqueeze(0)).squeeze(0)  # [N,2]
                 if pred.shape[-1] != target.shape[-1]:
                     raise RuntimeError(
                         f"Model/data mismatch in validation: pred has {pred.shape[-1]} outputs but target has {target.shape[-1]}"
                     )
-
                 loss = (pred - target).pow(2).mean()
                 val_loss += loss.item() * N
 
@@ -497,15 +497,6 @@ def train(
                 pred_raw = pred * target_std_v + target_mean_v
                 true_raw = target * target_std_v + target_mean_v
 
-                if epoch == 1 and count_val_points == 0:
-                    print(
-                        f"DEBUG: target_mean={target_mean_d.cpu().numpy()}, target_std={target_std_d.cpu().numpy()}"
-                    )
-                    for j, name in enumerate(target_names):
-                        print(
-                            f"DEBUG: {name} Pred range: {pred_raw[:, j].min().item():.2f} - {pred_raw[:, j].max().item():.2f}"
-                        )
-
                 d = pred_raw - true_raw
                 se_sum += torch.sum(d**2, dim=0).double().cpu()
                 sum_y += torch.sum(true_raw, dim=0).double().cpu()
@@ -513,10 +504,7 @@ def train(
 
                 count_val_points += int(N)
                 nval += N
-
         val_loss /= max(1, nval)
-
-        # Compute per-target R2/MSE in raw spaces
         if count_val_points > 0:
             val_mse = (se_sum / count_val_points).tolist()
             r2_vals: List[float] = []
@@ -527,38 +515,47 @@ def train(
         else:
             val_mse = [0.0] * n_targets
             r2_vals = [float("nan")] * n_targets
-
         epoch_dt = time.time() - epoch_t0
 
         metric_parts: List[str] = []
         for name, mse_j, r2_j in zip(target_names, val_mse, r2_vals):
-            metric_parts.append(f"{name} R2: {r2_j:.4f}")
             metric_parts.append(f"MSE({name}): {mse_j:.2f}")
+            metric_parts.append(f"R2({name}): {r2_j:.4f}")
         metrics_str = " | ".join(metric_parts)
 
         print(
-            f"Ep {epoch:03d} | L_tot: {train_loss:.4f}/{val_loss:.4f} | {metrics_str} | lr: {scheduler.get_last_lr()[0]:.2e} | {epoch_dt:.1f}s"
+            f"Epoch {epoch:03d} | train MSE: {train_loss:.6f} | val MSE: {val_loss:.6f} | "
+            f"{metrics_str} | lr: {scheduler.get_last_lr()[0]:.2e} | epoch: {epoch_dt:.1f}s"
         )
 
-        val_mse_map = {name: float(mse_j) for name, mse_j in zip(target_names, val_mse)}
-        val_r2_map = {name: float(r2_j) for name, r2_j in zip(target_names, r2_vals)}
-
-        history.append(
-            {
-                "epoch": int(epoch),
-                "train_loss": float(train_loss),
-                "val_loss": float(val_loss),
-                "target_names": target_names,
-                "val_r2": val_r2_map,
-                "val_mse": val_mse_map,
-                "lr": float(scheduler.get_last_lr()[0]),
-            }
-        )
+        train_history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
 
         # Checkpoint best
         if val_loss < (best_val - early_stopping_min_delta):
             best_val = val_loss
             epochs_since_improve = 0
+            if save_path is not None:
+                ckpt = {
+                    "model_state": model.state_dict(),
+                    "optimizer_state": optimizer.state_dict(),
+                    "scheduler_state": scheduler.state_dict(),
+                    "scaler_state": scaler.state_dict(),
+                    "arch": model.get_arch() if hasattr(model, "get_arch") else None,
+                    "coord_center": coord_center.cpu(),
+                    "coord_half_range": coord_half_range.cpu(),
+                    "target_mean": target_mean.cpu(),
+                    "target_std": target_std.cpu(),
+                    "epochs_since_improve": epochs_since_improve,
+                    "train_history": train_history,
+                    "config": {
+                        "epochs_trained": epoch,
+                        "best_val": best_val,
+                    },
+                }
+                # Convenience for validators expecting this key name
+                ckpt["best_val_loss"] = best_val
+                torch.save(ckpt, str(save_path))
+                print(f"Saved best model to: {save_path}")
         else:
             epochs_since_improve += 1
             if (
@@ -569,30 +566,6 @@ def train(
                     f"Early stopping triggered after {epochs_since_improve} epochs without improvement. Best val MSE: {best_val:.6f}"
                 )
                 break
-
-        # Save single checkpoint file each epoch (weights + optimizer/scheduler/scaler + history)
-        if save_path is not None and epochs_since_improve == 0:
-            ckpt = {
-                "model_state": model.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
-                "scheduler_state": scheduler.state_dict(),
-                "scaler_state": scaler.state_dict(),
-                "arch": model.get_arch() if hasattr(model, "get_arch") else None,
-                "coord_center": coord_center.cpu(),
-                "coord_half_range": coord_half_range.cpu(),
-                "target_mean": target_mean.cpu(),
-                "target_std": target_std.cpu(),
-                "model_name": model_name,
-                "history": history,
-                "config": {
-                    "epochs_trained": epoch,
-                    "best_val": best_val,
-                },
-            }
-            # Convenience for validators expecting this key name
-            ckpt["best_val_loss"] = best_val
-            torch.save(ckpt, str(save_path))
-            print(f"Saved checkpoint to: {save_path}")
 
     dt = time.time() - t0
     print(f"Training finished in {dt/60:.1f} min. Best val MSE: {best_val:.6f}")
@@ -612,16 +585,17 @@ def main(preset_name: str = "S0", batch=8) -> None:
     torch.set_float32_matmul_precision("high")
     print(f"Using device: {device}")
 
-    # Locate HDF5 file only in main
-    parent_dir = Path(project_dir).parent
+    # Locate HDF5 file based on dataset choice
+
     grandparent_dir = parent_dir.parent
     repo_dir = grandparent_dir.parent
     h5_dir = Path(repo_dir, "Data_gen", "output")
-    h5py_path = Path(h5_dir, "disc_dataset_edge_deriv_zonal.h5")
+    h5py_path = Path(h5_dir, "disc_dataset_full_uniform.h5")
     if not h5py_path.exists():
         raise FileNotFoundError(
             f"HDF5 file not found at {h5py_path}. Please ensure the data generation step has been completed and the file is in the expected location."
         )
+    
     print(f"Loading data from: {h5py_path}")
     PS_list_whole = load_h5_pointsets(h5py_path)
     print(f"Loaded {len(PS_list_whole)} datasets from the HDF5 file.")
@@ -646,9 +620,9 @@ def main(preset_name: str = "S0", batch=8) -> None:
 
     _cfg = PRESETS[preset_name]
     # In-file configuration (no CLI needed)
-    epochs: int = int(_cfg.get("epochs", 10000))
-    lr: float = float(_cfg.get("lr", 3e-4))
-    weight_decay: float = float(_cfg.get("weight_decay", 1e-4))
+    epochs: int = 50000
+    lr: float = 3e-4
+    weight_decay: float = 1e-4
     # Use all points every step (no subsampling of queries)
     max_points_per_geom: Optional[int] = (
         None  # set to an int to sample per-geometry points per step
@@ -656,63 +630,30 @@ def main(preset_name: str = "S0", batch=8) -> None:
     # Early stopping
     early_stopping_patience: int = 100
     early_stopping_min_delta: float = 0.0
-    # Architecture
-    latent_dim: int = int(_cfg["latent_dim"])  # encoder latent size
-    pre_hidden: List[int] = list(_cfg["pre_hidden"])  # pre-MLP on coords
-    sa_blocks: List[dict] = list(_cfg["sa_blocks"])  # set abstraction blocks
-    gf_hidden: List[int] = list(_cfg["gf_hidden"])  # global feature head
-    head_hidden: List[int] = list(_cfg["head_hidden"])  # MLP head sizes
+    # Architecture – ArGEnT DeepONet parameters
+    hidden_dim: int = int(_cfg.get("hidden_dim", 128))
+    num_heads: int = int(_cfg.get("num_heads", 4))
+    num_layers: int = int(_cfg.get("num_layers", 2))
+    output_dim: int = int(_cfg.get("output_dim", 128))
     # Optional human-readable model name (prefix for the file); set to None to use default
-    model_name: Optional[str] = _cfg.get("model_name", None)  # e.g., "pn_small_r0p08"
-
-    # Fourier positional encodings to enhance spatial/detail sensitivity
-    # Allow overriding positional encodings per preset; default to 4 freqs if unspecified
-    posenc = _cfg.get("posenc", {"n_freqs": 4, "scale": 1.0})
-    head_posenc = _cfg.get("head_posenc", {"n_freqs": 4, "scale": 1.0})
-
-    # Normalization/pooling flags (encoder + head). Defaults keep backward compatibility
-    enc_norm: str = str(_cfg.get("norm", "batch"))
-    enc_num_groups: int = int(_cfg.get("num_groups", 16))
-    enc_pool: str = str(_cfg.get("pool", "max"))  # 'max' | 'max+mean'
-    head_norm: str = str(_cfg.get("head_norm", "batch"))
-    head_dropout: float = float(_cfg.get("head_dropout", 0.0))
+    model_name: Optional[str] = _cfg.get("model_name")
 
     # Save path (unique per-architecture; overwrites across runs for the same arch)
     arch_for_hash = {
-        "latent_dim": latent_dim,
-        "pre_hidden": pre_hidden,
-        "sa_blocks": sa_blocks,
-        "gf_hidden": gf_hidden,
-        "head_hidden": head_hidden,
-        "out_dim": NUM_TARGETS,
-        "target_names": TARGET_NAMES,
-        "posenc": posenc,
-        "head_posenc": head_posenc,
-        "norm": enc_norm,
-        "num_groups": enc_num_groups,
-        "pool": enc_pool,
-        "head_norm": head_norm,
-        "head_dropout": head_dropout,
-        "normalization_fix": "v2",
+        "hidden_dim": hidden_dim,
+        "num_heads": num_heads,
+        "num_layers": num_layers,
+        "output_dim": output_dim,
+        "out_channels": NUM_TARGETS,
+        "attention_type": "self",
+        "use_sdf": False,
     }
     arch_hash = hashlib.md5(
         json.dumps(arch_for_hash, sort_keys=True).encode("utf-8")
     ).hexdigest()[:8]
     save_dir = Path(project_dir, "Trained_models")
-    base_name = model_name if model_name else "pnmlp"
+    base_name = model_name if model_name else "argent_self_nosdf"
     save_path = save_dir / f"{base_name}_{arch_hash}.pt"
-
-    resume_checkpoint = None
-    if save_path.exists():
-        print(f"Found existing checkpoint at {save_path}. Loading...")
-        try:
-            resume_checkpoint = torch.load(save_path, map_location="cpu")
-            print("Checkpoint loaded successfully.")
-        except Exception as e:
-            print(f"Failed to load checkpoint: {e}. Starting fresh.")
-            resume_checkpoint = None
-    else:
-        print(f"No existing checkpoint at {save_path}. Initializing new model.")
 
     set_seed(42)
 
@@ -727,36 +668,16 @@ def main(preset_name: str = "S0", batch=8) -> None:
     coord_center, coord_half_range, target_mean, target_std = (
         compute_global_normalization(train_tensors)
     )
-
-    if resume_checkpoint is not None:
-        print(
-            "Overwriting normalization stats with values from checkpoint to ensure consistency."
-        )
-        coord_center = resume_checkpoint["coord_center"]
-        coord_half_range = resume_checkpoint["coord_half_range"]
-        target_mean = resume_checkpoint["target_mean"]
-        target_std = resume_checkpoint["target_std"]
-
     print(
-        "Using per-target z-score normalization so Stress (~200-1200) and LogLife (~3-7) are balanced during training."
-    )
-    print(
-        f"Coord center={coord_center.numpy()}, half_range={coord_half_range.numpy()} | target_mean={target_mean.numpy()}, target_std={target_std.numpy()}"
+        f"Coord center={coord_center.numpy()}, half_range={coord_half_range.numpy()} | "
+        f"target_mean={target_mean.numpy()}, target_std={target_std.numpy()}"
     )
 
-    train_ds = GeomLifeDataset(
-        train_tensors,
-        coord_center,
-        coord_half_range,
-        target_mean,
-        target_std,
+    train_ds = GeomStressDataset(
+        train_tensors, coord_center, coord_half_range, target_mean, target_std,
     )
-    val_ds = GeomLifeDataset(
-        val_tensors,
-        coord_center,
-        coord_half_range,
-        target_mean,
-        target_std,
+    val_ds = GeomStressDataset(
+        val_tensors, coord_center, coord_half_range, target_mean, target_std,
     )
 
     # Training mode: "full" (encoder sees ALL points, batch_size=1),
@@ -818,42 +739,28 @@ def main(preset_name: str = "S0", batch=8) -> None:
     )
 
     # Build architecture config from flags
-    encoder_cfg = {
-        "latent_dim": latent_dim,
-        "pre_hidden": pre_hidden,
-        "sa_blocks": sa_blocks,
-        "gf_hidden": gf_hidden,
-        "posenc": posenc,
-        "head_posenc": head_posenc,
-        # new flags
-        "norm": enc_norm,
-        "num_groups": enc_num_groups,
-        "pool": enc_pool,
-        "head_norm": head_norm,
-        "head_dropout": head_dropout,
-    }
-
-    model = PointNetMLPJoint(
-        latent_dim=latent_dim,
-        mlp_hidden=head_hidden,
-        out_dim=NUM_TARGETS,
-        encoder_cfg=encoder_cfg,
+    print(
+        f"Building ArGEnTDeepONet (self-attention, no SDF): "
+        f"hidden_dim={hidden_dim}, num_heads={num_heads}, "
+        f"num_layers={num_layers}, output_dim={output_dim}."
     )
-    param_count = sum(p.numel() for p in model.parameters())
-    print(f"Model initialized with {param_count:,} parameters.")
-    if resume_checkpoint is not None:
-        try:
-            model.load_state_dict(resume_checkpoint["model_state"], strict=True)
-            print("Checkpoint model state is compatible and will be resumed.")
-        except (KeyError, RuntimeError, ValueError) as exc:
-            print(
-                f"Checkpoint model state is incompatible ({exc}). Initializing new model."
-            )
-            resume_checkpoint = None
 
+    model = ArGEnTDeepONet(
+        hidden_dim=hidden_dim,
+        num_heads=num_heads,
+        num_layers=num_layers,
+        output_dim=output_dim,
+        out_channels=NUM_TARGETS,
+        attention_type="self",
+        use_sdf=False,
+    )
+    parameter_count = sum(p.numel() for p in model.parameters())
+    print(f"Model parameter count: {parameter_count:,}")
+    n_param = sum(p.numel() for p in model.parameters())
+    print(f"Model parameter count: {n_param:,}")
     # Ensure save directory exists
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Saving checkpoint to: {save_path}")
+    print(f"Saving best checkpoint to: {save_path}")
     train(
         model,
         train_loader,
@@ -871,14 +778,13 @@ def main(preset_name: str = "S0", batch=8) -> None:
         early_stopping_patience=early_stopping_patience,
         early_stopping_min_delta=early_stopping_min_delta,
         use_amp=(device.type == "cuda"),
-        resume_checkpoint=resume_checkpoint,
-        model_name=model_name,
     )
 
 
 if __name__ == "__main__":
     try:
-        main("S_full_ln_pos12", 1)
+        # Choose dataset: "L_bracket" for L-bracket geometry or "Plate_hole" for hole plate geometry
+        main("S", batch=1)
     except Exception as e:
         print(f"Error during training: {e}")
         raise
