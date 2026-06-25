@@ -247,11 +247,15 @@ class PointNet2Encoder2D(nn.Module):
     """
 
     def __init__(
-        self, latent_dim: int = 128, encoder_cfg: Optional[Dict[str, Any]] = None
+        self,
+        latent_dim: int = 128,
+        encoder_cfg: Optional[Dict[str, Any]] = None,
+        in_channels: int = 2,
     ):
         super().__init__()
         cfg = dict(encoder_cfg) if encoder_cfg is not None else {}
         self.latent_dim = int(cfg.get("latent_dim", latent_dim))
+        self.in_channels = int(cfg.get("in_channels", in_channels))
         pre_hidden: List[int] = list(cfg.get("pre_hidden", [64, 64]))
         sa_blocks_cfg: List[Dict[str, Any]] = list(
             cfg.get(
@@ -285,7 +289,7 @@ class PointNet2Encoder2D(nn.Module):
         # Optional Fourier positional encoding before pre-MLP
         posenc_cfg = cfg.get("posenc", None)
         self.posenc: Optional[FourierFeatures] = None
-        in_ch_pre = 2
+        in_ch_pre = self.in_channels
         if isinstance(posenc_cfg, dict):
             n_freqs = int(posenc_cfg.get("n_freqs", 0))
             scale = float(posenc_cfg.get("scale", 1.0))
@@ -340,6 +344,7 @@ class PointNet2Encoder2D(nn.Module):
         # Persist resolved config
         self.encoder_cfg: Dict[str, Any] = {
             "latent_dim": self.latent_dim,
+            "in_channels": self.in_channels,
             "pre_hidden": pre_hidden,
             "sa_blocks": [
                 {
@@ -382,11 +387,12 @@ class PointNetMLPJoint(nn.Module):
         mlp_hidden: Optional[List[int]] = None,
         out_dim: int = 1,
         encoder_cfg: Optional[Dict[str, Any]] = None,
+        in_channels: int = 2,
     ):
         super().__init__()
         # Encoder (cfg latent_dim overrides arg if provided)
         self.encoder = PointNet2Encoder2D(
-            latent_dim=latent_dim, encoder_cfg=encoder_cfg
+            latent_dim=latent_dim, encoder_cfg=encoder_cfg, in_channels=in_channels
         )
         eff_latent = self.encoder.latent_dim
         if mlp_hidden is None:
@@ -478,9 +484,11 @@ def build_model_from_arch(arch: Dict[str, Any]) -> PointNetMLPJoint:
     head_hidden = arch.get("head_hidden", [256, 256, 128])
     out_dim = int(arch.get("out_dim", 1))
     latent_dim = int(encoder_cfg.get("latent_dim", 128)) if encoder_cfg else 128
+    in_channels = int(encoder_cfg.get("in_channels", 2)) if encoder_cfg else 2
     return PointNetMLPJoint(
         latent_dim=latent_dim,
         mlp_hidden=head_hidden,
         out_dim=out_dim,
         encoder_cfg=encoder_cfg,
+        in_channels=in_channels,
     )
