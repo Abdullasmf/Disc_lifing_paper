@@ -27,9 +27,54 @@ parent_dir = Path(project_dir).parent
 # Defer device prints and data loading to main() to avoid re-exec in worker processes
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# ==== PER-ABLATION CONFIG ====
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
-TARGET_COLS: Tuple[int, int] = (2, 4)  # [x, y, stress, temp, log(life)]
+INPUT_COLS: List[int] = [0, 1, 3]
+H5_FILENAME: str = "disc_dataset_edge_deriv_zonal.h5"
+EXPECTED_REPR: str = "edge"
+# ==== END PER-ABLATION CONFIG ====
+
 NUM_TARGETS: int = len(TARGET_NAMES)
+QUERY_COLS: List[int] = [0, 1]  # head query always uses (x, r)
+
+
+def target_cols_for_width(width: int) -> Tuple[int, ...]:
+    """Loader appends stress at width-2 and log10(life) at width-1.
+
+    Returns both when NUM_TARGETS == 2, else only the life column.
+    """
+    stress_col = width - 2
+    life_col = width - 1
+    if NUM_TARGETS == 2:
+        return (stress_col, life_col)
+    return (life_col,)
+
+
+def build_enc_norm(
+    coord_center: torch.Tensor,
+    coord_half_range: torch.Tensor,
+    extra_feat_stats: Dict[int, Dict[str, float]],
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Build per-INPUT_COL normalization (mean, std) vectors aligned to INPUT_COLS.
+
+    Cols 0/1 use coord min-max (center, half_range); other cols use z-score stats.
+    """
+    means: List[float] = []
+    stds: List[float] = []
+    for c in INPUT_COLS:
+        if c == 0:
+            means.append(float(coord_center[0]))
+            stds.append(float(coord_half_range[0]))
+        elif c == 1:
+            means.append(float(coord_center[1]))
+            stds.append(float(coord_half_range[1]))
+        else:
+            st = extra_feat_stats[c]
+            means.append(float(st["mean"]))
+            stds.append(float(st["std"]))
+    enc_mean = torch.tensor(means, dtype=torch.float32)
+    enc_std = torch.clamp(torch.tensor(stds, dtype=torch.float32), min=1e-8)
+    return enc_mean, enc_std
 
 
 # ---------------------------------------------------------------------------
@@ -113,12 +158,11 @@ def load_h5_pointsets(path: Path) -> List[torch.Tensor]:
 # Loaded in main()
 
 
-class GeomStressDataset(Dataset):
+class GeomLifeDataset(Dataset):
     """
     Geometry-level dataset. Each item is one simulation geometry with variable number of points.
-    x: [N,2] coordinates, y: [N,2] = [Stress, LogLife].
+    Encoder features come from INPUT_COLS; head query is always (x, r); targets per NUM_TARGETS.
     Applies global normalization using provided stats.
-    Tensors have layout (x, y, stress, temp, log(life)) -> shape [N, 5].
     """
 
     def __init__(
@@ -128,36 +172,48 @@ class GeomStressDataset(Dataset):
         coord_half_range: torch.Tensor,
         target_mean: torch.Tensor,
         target_std: torch.Tensor,
+        extra_feat_stats: Dict[int, Dict[str, float]],
     ) -> None:
         super().__init__()
-        self.items: List[Tuple[torch.Tensor, torch.Tensor]] = []
+        self.items: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
         self.coord_center = coord_center
         self.coord_half_range = torch.clamp(coord_half_range, min=1e-8)
         self.target_mean = target_mean
         self.target_std = torch.clamp(target_std, min=1e-8)
+        self.extra_feat_stats = extra_feat_stats
+        self.enc_mean, self.enc_std = build_enc_norm(
+            coord_center, coord_half_range, extra_feat_stats
+        )
         for t in tensors:
-            required_cols = max(TARGET_COLS) + 1
-            if t.shape[1] < required_cols:
-                raise ValueError(
-                    "Each tensor must have shape [N,5]: x,y,stress,temp,log(life)"
+            width = t.shape[1]
+            required_cols = max(INPUT_COLS) + 1
+            if width < required_cols:
+                missing = [c for c in INPUT_COLS if c >= width]
+                raise RuntimeError(
+                    f"Tensor width {width} too small for INPUT_COLS={INPUT_COLS}; "
+                    f"missing columns {missing}. Check H5 representation matches '{EXPECTED_REPR}'."
                 )
-            xy = t[:, :2].contiguous()
-            target = t[:, list(TARGET_COLS)].contiguous()
-            self.items.append((xy, target))
+            tcols = target_cols_for_width(width)
+            enc_feats = t[:, INPUT_COLS].contiguous()
+            query_xy = t[:, QUERY_COLS].contiguous()
+            target = t[:, list(tcols)].contiguous()
+            self.items.append((enc_feats, query_xy, target))
 
     def __len__(self) -> int:
         return len(self.items)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        xy, target = self.items[idx]
+        enc_feats, xy, target = self.items[idx]
         # Normalize with GLOBAL stats computed from training set
+        enc_n = (enc_feats - self.enc_mean) / self.enc_std
         xyn = (xy - self.coord_center) / self.coord_half_range
         target_n = (target - self.target_mean) / self.target_std
-        # Points: only (x, y) normalized – no SDF for self-attention variant
         return {
-            "points": xyn,   # [N, 2]
-            "target": target_n,    # [N, 2] => [Stress, LogLife]
+            "enc_feats": enc_n,   # [N, len(INPUT_COLS)] normalized encoder input
+            "points": xyn,   # [N, 2] normalized (x, r) query coords
+            "target": target_n,    # [N, NUM_TARGETS] standardized targets
             # Provide also unnormalized for potential analysis if needed
+            "enc_feats_raw": enc_feats,
             "points_raw": xy,
             "target_raw": target,
         }
@@ -177,22 +233,27 @@ def make_collate_fixed_points(k: int):
     """
 
     def _collate(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
-        pts_b: List[torch.Tensor] = []
+        gp_b: List[torch.Tensor] = []
+        qp_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         for item in batch:
-            pts = item["points"]  # [N,2] on CPU
-            target = item["target"]  # [N,2]
+            enc = item["enc_feats"]  # [N, len(INPUT_COLS)]
+            pts = item["points"]  # [N,2]
+            target = item["target"]
             N = pts.shape[0]
             if N >= k:
                 idx = torch.randperm(N)[:k]
             else:
                 # sample with replacement to reach k
                 idx = torch.randint(0, N, (k,))
-            pts_b.append(pts[idx])
+            gp_b.append(enc[idx])
+            qp_b.append(pts[idx])
             t_b.append(target[idx])
-        points = torch.stack(pts_b, dim=0)  # [B,k,2]
-        target = torch.stack(t_b, dim=0)  # [B,k,2]
-        return {"points": points, "target": target}
+        return {
+            "geom_points": torch.stack(gp_b, dim=0),
+            "query_points": torch.stack(qp_b, dim=0),
+            "target": torch.stack(t_b, dim=0),
+        }
 
     return _collate
 
@@ -215,8 +276,9 @@ class DualSamplerCollate:
         qp_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         for item in batch:
-            pts = item["points"]  # [N,2] on CPU
-            target = item["target"]  # [N,2]
+            enc = item["enc_feats"]  # [N, len(INPUT_COLS)]
+            pts = item["points"]  # [N,2]
+            target = item["target"]
             N = pts.shape[0]
             # Encoder samples
             if N >= self.k_enc:
@@ -228,7 +290,7 @@ class DualSamplerCollate:
                 idx_q = torch.randperm(N)[: self.k_q]
             else:
                 idx_q = torch.randint(0, N, (self.k_q,))
-            gp_b.append(pts[idx_enc])
+            gp_b.append(enc[idx_enc])
             qp_b.append(pts[idx_q])
             t_b.append(target[idx_q])
         return {
@@ -252,24 +314,28 @@ class AllNodesPadCollate:
     def __call__(self, batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         Ns = [item["points"].shape[0] for item in batch]
         maxN = max(Ns)
-        C = batch[0]["points"].shape[1]
+        enc_C = batch[0]["enc_feats"].shape[1]
+        q_C = batch[0]["points"].shape[1]
         gp_b: List[torch.Tensor] = []
         qp_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         mask_b: List[torch.Tensor] = []
         for item, N in zip(batch, Ns):
-            pts = item["points"]  # [N, C]
-            target = item["target"]    # [N, 2]
+            enc = item["enc_feats"]  # [N, len(INPUT_COLS)]
+            pts = item["points"]  # [N, q_C]
+            target = item["target"]    # [N, NUM_TARGETS]
             if N < maxN:
                 pad = maxN - N
-                pts_pad = torch.cat([pts, torch.zeros(pad, C, dtype=pts.dtype)], dim=0)
+                enc_pad = torch.cat([enc, torch.zeros(pad, enc_C, dtype=enc.dtype)], dim=0)
+                pts_pad = torch.cat([pts, torch.zeros(pad, q_C, dtype=pts.dtype)], dim=0)
                 target_pad = torch.cat([target, torch.zeros(pad, target.shape[1], dtype=target.dtype)], dim=0)
             else:
+                enc_pad = enc
                 pts_pad = pts
                 target_pad = target
             m = torch.zeros(maxN, dtype=torch.bool)
             m[:N] = True
-            gp_b.append(pts_pad)
+            gp_b.append(enc_pad)
             qp_b.append(pts_pad)
             t_b.append(target_pad)
             mask_b.append(m)
@@ -283,20 +349,38 @@ class AllNodesPadCollate:
 
 def compute_global_normalization(
     train_tensors: List[torch.Tensor],
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Compute coord center/half-range and target (Stress, LogLife) mean/std from training set.
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict[int, Dict[str, float]]]:
+    """Compute coord center/half-range, target mean/std, and extra feature stats.
 
-    Tensors have layout (x, y, stress, temp, log(life)) -> shape [N, 5].
+    Coords (x, r) use min-max; targets and extra features (cols 2-7) use z-score.
+    zone_id (col 2) is mapped via fixed {mean=0, std=4} to scale {0..4} -> {0..1}.
     """
+    width = train_tensors[0].shape[1]
+    tcols = target_cols_for_width(width)
+
     all_xy = torch.cat([t[:, :2]  for t in train_tensors], dim=0)
-    all_targets = torch.cat([t[:, list(TARGET_COLS)] for t in train_tensors], dim=0)
+    all_targets = torch.cat([t[:, list(tcols)] for t in train_tensors], dim=0)
     xy_min = all_xy.min(dim=0).values
     xy_max = all_xy.max(dim=0).values
     coord_center     = 0.5 * (xy_min + xy_max)
     coord_half_range = torch.clamp(0.5 * (xy_max - xy_min), min=1e-6)
     target_mean = all_targets.mean(dim=0)
     target_std = all_targets.std(dim=0, unbiased=False).clamp(min=1e-6)
-    return coord_center, coord_half_range, target_mean, target_std
+
+    extra_feat_stats: Dict[int, Dict[str, float]] = {}
+    for c in INPUT_COLS:
+        if c in (0, 1):
+            continue
+        if c == 2:
+            # zone_id: fixed scaling, divide by 4.0
+            extra_feat_stats[c] = {"mean": 0.0, "std": 4.0}
+        else:
+            vals = torch.cat([t[:, c] for t in train_tensors], dim=0)
+            mean_c = float(vals.mean())
+            std_c = float(vals.std(unbiased=False))
+            extra_feat_stats[c] = {"mean": mean_c, "std": max(std_c, 1e-6)}
+
+    return coord_center, coord_half_range, target_mean, target_std, extra_feat_stats
 
 
 def set_seed(seed: int = 42) -> None:
@@ -315,6 +399,7 @@ def train(
     coord_half_range: torch.Tensor,
     target_mean: torch.Tensor,
     target_std: torch.Tensor,
+    extra_feat_stats: Dict[int, Dict[str, float]],
     epochs: int = 100,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
@@ -478,13 +563,14 @@ def train(
         count_val_points = 0
         with torch.no_grad():
             for batch in val_loader:
-                pts: torch.Tensor = batch["points"].to(device)  # [N,2] (x_norm, y_norm)
-                target: torch.Tensor = batch["target"].to(device)  # [N,2] => [Stress, LogLife]
+                enc: torch.Tensor = batch["enc_feats"].to(device)  # [N, len(INPUT_COLS)]
+                pts: torch.Tensor = batch["points"].to(device)  # [N,2] (x_norm, r_norm)
+                target: torch.Tensor = batch["target"].to(device)  # [N, NUM_TARGETS]
                 N = pts.shape[0]
                 with torch.amp.autocast(
                     "cuda", enabled=(device.type == "cuda" and use_amp)
                 ):
-                    pred = model(pts.unsqueeze(0), pts.unsqueeze(0)).squeeze(0)  # [N,2]
+                    pred = model(enc.unsqueeze(0), pts.unsqueeze(0)).squeeze(0)  # [N, NUM_TARGETS]
                 if pred.shape[-1] != target.shape[-1]:
                     raise RuntimeError(
                         f"Model/data mismatch in validation: pred has {pred.shape[-1]} outputs but target has {target.shape[-1]}"
@@ -545,6 +631,7 @@ def train(
                     "coord_half_range": coord_half_range.cpu(),
                     "target_mean": target_mean.cpu(),
                     "target_std": target_std.cpu(),
+                    "extra_feat_stats": extra_feat_stats,
                     "epochs_since_improve": epochs_since_improve,
                     "train_history": train_history,
                     "config": {
@@ -590,12 +677,21 @@ def main(preset_name: str = "S0", batch=8) -> None:
     grandparent_dir = parent_dir.parent
     repo_dir = grandparent_dir.parent
     h5_dir = Path(repo_dir, "Data_gen", "output")
-    h5py_path = Path(h5_dir, "disc_dataset_edge_deriv_zonal.h5")
+    h5py_path = Path(h5_dir, H5_FILENAME)
     if not h5py_path.exists():
         raise FileNotFoundError(
             f"HDF5 file not found at {h5py_path}. Please ensure the data generation step has been completed and the file is in the expected location."
         )
-    
+    with h5py.File(h5py_path, "r") as _h5f:
+        _repr = _h5f.attrs.get("representation")
+        if isinstance(_repr, bytes):
+            _repr = _repr.decode("utf-8")
+        if _repr != EXPECTED_REPR:
+            raise RuntimeError(
+                f"H5 representation mismatch at {h5py_path}: expected '{EXPECTED_REPR}', "
+                f"found '{_repr}'. Wrong dataset file for this ablation."
+            )
+
     print(f"Loading data from: {h5py_path}")
     PS_list_whole = load_h5_pointsets(h5py_path)
     print(f"Loaded {len(PS_list_whole)} datasets from the HDF5 file.")
@@ -647,6 +743,9 @@ def main(preset_name: str = "S0", batch=8) -> None:
         "out_channels": NUM_TARGETS,
         "attention_type": "self",
         "use_sdf": False,
+        "in_channels": len(INPUT_COLS),
+        "input_cols": INPUT_COLS,
+        "target_names": TARGET_NAMES,
     }
     arch_hash = hashlib.md5(
         json.dumps(arch_for_hash, sort_keys=True).encode("utf-8")
@@ -665,7 +764,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
     train_tensors = [PS_list_whole[i] for i in train_idx]
     val_tensors = [PS_list_whole[i] for i in val_idx]
 
-    coord_center, coord_half_range, target_mean, target_std = (
+    coord_center, coord_half_range, target_mean, target_std, extra_feat_stats = (
         compute_global_normalization(train_tensors)
     )
     print(
@@ -673,11 +772,13 @@ def main(preset_name: str = "S0", batch=8) -> None:
         f"target_mean={target_mean.numpy()}, target_std={target_std.numpy()}"
     )
 
-    train_ds = GeomStressDataset(
+    train_ds = GeomLifeDataset(
         train_tensors, coord_center, coord_half_range, target_mean, target_std,
+        extra_feat_stats,
     )
-    val_ds = GeomStressDataset(
+    val_ds = GeomLifeDataset(
         val_tensors, coord_center, coord_half_range, target_mean, target_std,
+        extra_feat_stats,
     )
 
     # Training mode: "full" (encoder sees ALL points, batch_size=1),
@@ -769,6 +870,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         coord_half_range,
         target_mean,
         target_std,
+        extra_feat_stats,
         epochs=epochs,
         lr=lr,
         weight_decay=weight_decay,
