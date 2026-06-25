@@ -101,25 +101,28 @@ CYCLE_PHASE_WEIGHTS = np.array([0.20, 0.08, 0.15, 0.32, 0.12, 0.05, 0.08], dtype
 # ---------------------------------------------------------------------------
 # S-N (stress-life) fatigue parameters for the life model.
 #
-# Derivation (Ti-6Al-4V, fully-reversed R=-1, polished baseline):
-#   * Baseline high-cycle fatigue strength of Ti-6Al-4V is ~600 MPa at the knee
-#     (~1e7 cycles) for smooth, polished, R=-1 specimens. We anchor the knee
-#     stress to a base endurance limit SIGMA_E0 = 620 MPa and apply a
-#     per-zone knockdown factor that lumps notch sensitivity, surface finish,
-#     size and stress-gradient effects for each engineering zone:
-#         bore=0.80, lower_transition=0.75, web=0.90,
-#         upper_transition=0.75, rim=0.85
-#     giving knee_stress_mpa = SIGMA_E0 * knockdown (≈465–558 MPa, within the
-#     ~500–620 MPa target band; the transition shoulders are the harshest).
-#   * knee_life is the cycle count at the knee: ~1e6–1e7. Stress-concentrating
-#     transition shoulders are placed at the lower end (5e6) and the bulk
-#     bore/web/rim at 1e7.
-#   * slope_high is the Basquin exponent of the high-cycle (above-knee) branch.
-#     Ti-6Al-4V high-cycle slopes lie in the ~8–12 range; notched transition
-#     zones are slightly steeper (more stress-sensitive) than the bulk.
-#   * slope_low is the long-life (below-knee) branch exponent; it is set
-#     larger than slope_high so the curve flattens out in log(sigma) vs log(N).
-# These are engineering allowables per zone, not random per-sample materials.
+# Calibration rationale (synthetic dataset for ML benchmarking):
+#   The axisymmetric FEM at OMEGA_REF_RAD_S=4000 rad/s on the nominal geometry
+#   produces von Mises stresses in the range ~180-620 MPa. The stress amplitude
+#   entering the S-N curve is sigma_a = 0.5 * phase_vm (ground-air-ground LCF
+#   convention, R=0 from rest). At takeoff (speed_factor=1.0) this gives
+#   sigma_a ~ 90-310 MPa across the disc. At the lowest phase (taxi_return,
+#   speed_factor=0.18, scale=0.032) sigma_a drops to ~3-20 MPa.
+#
+#   Knee stresses are set within the sigma_a range so that:
+#     - Critical fillet zones (lower/upper_transition) sit above the knee at
+#       takeoff -> short LCF lives (1e5-1e6 cycles) as expected physically.
+#     - Bulk bore/web/rim nodes sit near or slightly above the knee at takeoff
+#       -> moderate lives (1e6-1e9 cycles) giving meaningful ML targets.
+#     - No zone is permanently sub-knee at all phases -> avoids 1e16+ runout.
+#
+#   These are synthetic allowables tuned to produce a physically plausible life
+#   distribution for ML dataset generation, not certified material data.
+#
+#   slope_high: Basquin exponent above the knee (~8-12 for Ti-6Al-4V HCF).
+#   slope_low:  Sub-knee branch exponent; larger than slope_high so the curve
+#               flattens in log(sigma)-log(N) space.
+#   knee_life:  Transition cycle count; transition zones at 5e6, bulk at 1e7.
 # ---------------------------------------------------------------------------
 SIGMA_E0_MPA = 620.0
 ZONE_KNOCKDOWN = {
@@ -132,45 +135,42 @@ ZONE_KNOCKDOWN = {
 
 ZONAL_SN_PARAMS: Dict[str, Dict[str, float]] = {
     "bore": {
-        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["bore"],          # 496.0
-        "knee_stress_mpa": 220.0,
+        # knee calibrated to ~bore takeoff sigma_a (0.5 * ~160 MPa vm) = ~80 MPa
+        "knee_stress_mpa": 80.0,
         "knee_life": 1.0e7,
         "slope_high": 9.5,
         "slope_low": 22.0,
     },
     "lower_transition": {
-        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["lower_transition"],  # 465.0
-        "knee_stress_mpa": 180.0,
+        # knee calibrated below fillet peak sigma_a (~310 MPa) to give LCF lives
+        "knee_stress_mpa": 60.0,
         "knee_life": 5.0e6,
         "slope_high": 11.0,
         "slope_low": 24.0,
     },
     "web": {
-        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["web"],           # 558.0
-        "knee_stress_mpa": 260.0,
+        # knee calibrated to ~web takeoff sigma_a (0.5 * ~200 MPa vm) = ~100 MPa
+        "knee_stress_mpa": 100.0,
         "knee_life": 1.0e7,
         "slope_high": 8.5,
         "slope_low": 20.0,
     },
     "upper_transition": {
-        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["upper_transition"],  # 465.0
-        "knee_stress_mpa": 180.0,
+        # knee calibrated below upper fillet sigma_a to give LCF lives
+        "knee_stress_mpa": 60.0,
         "knee_life": 5.0e6,
         "slope_high": 11.0,
         "slope_low": 24.0,
     },
     "rim": {
-        # "knee_stress_mpa": SIGMA_E0_MPA * ZONE_KNOCKDOWN["rim"],           # 527.0
-        "knee_stress_mpa": 240.0,
+        # knee calibrated to ~rim takeoff sigma_a (0.5 * ~150 MPa vm) = ~75 MPa
+        "knee_stress_mpa": 75.0,
         "knee_life": 1.0e7,
         "slope_high": 9.0,
         "slope_low": 21.0,
     },
 }
-# Knee stresses calibrated to the FEM stress field at the nominal operating point (ω = 4000 rad/s), scaled per zone by surface finish and notch sensitivity knockdowns relative to the computed amplitude range.
-# Uniform mode: a single S-N curve for every zone, equal to the web-zone set
-# (the highest-knockdown bulk allowable per CHANGE 2c).
-# UNIFORM_SN_PARAMS: Dict[str, float] = dict(ZONAL_SN_PARAMS["web"])
+# Uniform mode: a single S-N curve for every zone, equal to the web-zone set.
 UNIFORM_SN_PARAMS: Dict[str, float] = dict(ZONAL_SN_PARAMS["web"])
 
 
