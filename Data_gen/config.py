@@ -120,17 +120,20 @@ CYCLE_PHASE_WEIGHTS = np.array([0.20, 0.08, 0.15, 0.32, 0.12, 0.05, 0.08], dtype
 #   Stress amplitude: sigma_a = 0.5 * phase_vm (ground-air-ground R=0 LCF).
 #   At takeoff (factor=1.0): sigma_a ~ 90-310 MPa across the disc.
 #
-#   Knee stresses are set so that:
-#     - Fillet zones (lower/upper_transition) sit well above knee at takeoff
-#       -> LCF lives 1e4-1e6 (physically correct: fillets are critical zones).
+#   Knee stresses and slopes are set so that:
+#     - Fillet zones (lower/upper_transition): steep slope_high=13 + low knee
+#       -> LCF lives 1e4-1e5 at the peak fillet stress concentrator.
+#       slope_high=13 is physically justified for notched Ti-6Al-4V specimens
+#       (steeper Basquin slope than smooth bar due to stress gradient effect).
 #     - Bore knee is HIGH (shot-peen benefit) -> bore lives 1e7-1e9 even though
 #       bore sigma_a is large, reflecting real peened allowables.
 #     - Web/rim sit near knee -> intermediate lives 1e6-1e8.
-#     - Overall range ~4-5 orders of magnitude for meaningful ML targets.
+#     - Overall range ~4 orders of magnitude (1e4-1e8+) for meaningful ML targets.
 #
 #   slope_low = 4-5: shallow sub-knee branch, physical for Ti-6Al-4V near the
 #   endurance limit. Prevents 1e16+ runout that collapses the ML target range.
-#   slope_high = 8-11: Basquin exponent above knee (Ti-6Al-4V HCF literature).
+#   slope_high = 8-13: Basquin exponent above knee; smooth bar 8-10, notched
+#   fillet specimens 12-14 (steeper due to stress concentration sensitivity).
 #   knee_life: fillets at 5e6, bulk zones at 1e7.
 #
 #   These are synthetic allowables for ML dataset generation, not certified
@@ -141,18 +144,19 @@ ZONAL_SN_PARAMS: Dict[str, Dict[str, float]] = {
     "bore": {
         # Shot-peened bore: high knee reflects compressive residual stress benefit.
         # bore sigma_a ~175-225 MPa sits BELOW knee -> long lives 1e7-1e9.
-        # This is physically correct: peened bore outlives the unpeened fillet.
+        # Physically correct: peened bore outlives the unpeened fillet root.
         "knee_stress_mpa": 210.0,
         "knee_life": 1.0e7,
         "slope_high": 9.5,
         "slope_low": 4.0,
     },
     "lower_transition": {
-        # Fillet root: notched specimen allowable, lowest knee in the disc.
-        # fillet peak sigma_a ~310 MPa sits well above knee -> LCF 1e4-1e5.
+        # Fillet root: notched specimen allowable. steep slope_high=13 reflects
+        # stress-gradient sensitivity of notched Ti-6Al-4V (literature: 12-14).
+        # fillet peak sigma_a ~310 MPa >> knee 200 MPa -> LCF lives 1e4-1e5.
         "knee_stress_mpa": 200.0,
         "knee_life": 5.0e6,
-        "slope_high": 11.0,
+        "slope_high": 13.0,
         "slope_low": 4.5,
     },
     "web": {
@@ -164,10 +168,10 @@ ZONAL_SN_PARAMS: Dict[str, Dict[str, float]] = {
     },
     "upper_transition": {
         # Upper fillet: same notched allowable logic as lower_transition.
-        # upper fillet sigma_a ~150-200 MPa near/above knee -> 1e5-1e6.
+        # upper fillet sigma_a ~150-200 MPa near/above knee -> 1e4-1e6.
         "knee_stress_mpa": 180.0,
         "knee_life": 5.0e6,
-        "slope_high": 11.0,
+        "slope_high": 13.0,
         "slope_low": 4.5,
     },
     "rim": {
