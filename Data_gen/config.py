@@ -99,75 +99,80 @@ CYCLE_PHASE_WEIGHTS = np.array([0.20, 0.08, 0.15, 0.32, 0.12, 0.05, 0.08], dtype
 
 
 # ---------------------------------------------------------------------------
-# S-N (stress-life) fatigue parameters for the life model.
+# S-N (stress-life) fatigue parameters — synthetic zonal lifing curves.
 #
-# Calibration rationale (synthetic dataset for ML benchmarking):
-#   The axisymmetric FEM at OMEGA_REF_RAD_S=4000 rad/s on the nominal geometry
-#   produces von Mises stresses in the range ~180-620 MPa. The stress amplitude
-#   entering the S-N curve is sigma_a = 0.5 * phase_vm (ground-air-ground LCF
-#   convention, R=0 from rest). At takeoff (speed_factor=1.0) this gives
-#   sigma_a ~ 90-310 MPa across the disc. At the lowest phase (taxi_return,
-#   speed_factor=0.18, scale=0.032) sigma_a drops to ~3-20 MPa.
+# Physical basis for zonal discontinuities:
+#   In real engineering disc lifing, per-zone S-N allowables differ due to:
+#     - Surface treatment: bore is shot-peened (higher allowable), web/rim
+#       as-machined (lower), transition fillets are stress-concentration zones.
+#     - Inspection interval: bore inner surface is accessible; fillet roots
+#       have shorter mandatory replacement lives.
+#     - Material certification: allowables are zone-specific in OEM lifing manuals.
+#   Step changes at zone boundaries are therefore physically justified and
+#   intentionally retained for the ML ablation study (testing whether models
+#   can learn that zone label adds information beyond geometry alone).
 #
-#   Knee stresses are set within the sigma_a range so that:
-#     - Critical fillet zones (lower/upper_transition) sit above the knee at
-#       takeoff -> short LCF lives (1e5-1e6 cycles) as expected physically.
-#     - Bulk bore/web/rim nodes sit near or slightly above the knee at takeoff
-#       -> moderate lives (1e6-1e9 cycles) giving meaningful ML targets.
-#     - No zone is permanently sub-knee at all phases -> avoids 1e16+ runout.
+# Calibration rationale:
+#   FEM at OMEGA_REF_RAD_S=4000 rad/s gives von Mises range ~180-620 MPa.
+#   Stress amplitude: sigma_a = 0.5 * phase_vm (ground-air-ground R=0 LCF).
+#   At takeoff (factor=1.0): sigma_a ~ 90-310 MPa across the disc.
 #
-#   These are synthetic allowables tuned to produce a physically plausible life
-#   distribution for ML dataset generation, not certified material data.
+#   Knee stresses are set at ~0.5-0.7x the zone mean takeoff vm so that:
+#     - Critical fillet zones sit well above knee -> LCF lives 1e4-1e6.
+#     - Bulk zones (bore, web, rim) sit near knee -> HCF lives 1e6-1e9.
+#     - No zone produces sub-1 cycle lives (knee not too low).
 #
-#   slope_high: Basquin exponent above the knee (~8-12 for Ti-6Al-4V HCF).
-#   slope_low:  Sub-knee branch exponent; larger than slope_high so the curve
-#               flattens in log(sigma)-log(N) space.
-#   knee_life:  Transition cycle count; transition zones at 5e6, bulk at 1e7.
+#   slope_low is set to 4-5 (shallow, physical for Ti-6Al-4V near endurance
+#   limit) rather than 20-24, so sub-knee nodes give large but finite lives
+#   (1e8-1e10) rather than 1e16+ runout that collapses the ML target range.
+#
+#   slope_high: Basquin exponent above knee, 8-11 (Ti-6Al-4V HCF literature).
+#   knee_life: transition cycles; fillets at 5e6, bulk zones at 1e7.
+#
+#   These are synthetic allowables for ML dataset generation, not certified
+#   material data. The zonal structure mirrors real OEM lifing practice.
 # ---------------------------------------------------------------------------
-SIGMA_E0_MPA = 620.0
-ZONE_KNOCKDOWN = {
-    "bore": 0.80,
-    "lower_transition": 0.75,
-    "web": 0.90,
-    "upper_transition": 0.75,
-    "rim": 0.85,
-}
 
 ZONAL_SN_PARAMS: Dict[str, Dict[str, float]] = {
     "bore": {
-        # knee calibrated to ~bore takeoff sigma_a (0.5 * ~160 MPa vm) = ~80 MPa
-        "knee_stress_mpa": 80.0,
+        # bore takeoff vm ~350-450 MPa -> sigma_a ~175-225 MPa; knee at 160 MPa
+        # puts bore nodes moderately above knee -> lives ~1e5-1e7
+        "knee_stress_mpa": 160.0,
         "knee_life": 1.0e7,
         "slope_high": 9.5,
-        "slope_low": 22.0,
+        "slope_low": 4.0,
     },
     "lower_transition": {
-        # knee calibrated below fillet peak sigma_a (~310 MPa) to give LCF lives
-        "knee_stress_mpa": 60.0,
+        # fillet peak vm ~620 MPa -> sigma_a ~310 MPa; knee at 200 MPa
+        # puts fillet well above knee -> LCF lives ~1e4-1e5 (physically correct)
+        "knee_stress_mpa": 200.0,
         "knee_life": 5.0e6,
         "slope_high": 11.0,
-        "slope_low": 24.0,
+        "slope_low": 4.5,
     },
     "web": {
-        # knee calibrated to ~web takeoff sigma_a (0.5 * ~200 MPa vm) = ~100 MPa
-        "knee_stress_mpa": 100.0,
+        # web takeoff vm ~200-350 MPa -> sigma_a ~100-175 MPa; knee at 140 MPa
+        # puts web nodes near/above knee -> lives ~1e5-1e8
+        "knee_stress_mpa": 140.0,
         "knee_life": 1.0e7,
         "slope_high": 8.5,
-        "slope_low": 20.0,
+        "slope_low": 4.0,
     },
     "upper_transition": {
-        # knee calibrated below upper fillet sigma_a to give LCF lives
-        "knee_stress_mpa": 60.0,
+        # upper fillet vm ~300-400 MPa -> sigma_a ~150-200 MPa; knee at 180 MPa
+        # puts upper fillet near/above knee -> LCF/HCF boundary lives ~1e5-1e6
+        "knee_stress_mpa": 180.0,
         "knee_life": 5.0e6,
         "slope_high": 11.0,
-        "slope_low": 24.0,
+        "slope_low": 4.5,
     },
     "rim": {
-        # knee calibrated to ~rim takeoff sigma_a (0.5 * ~150 MPa vm) = ~75 MPa
-        "knee_stress_mpa": 75.0,
+        # rim takeoff vm ~200-250 MPa -> sigma_a ~100-125 MPa; knee at 120 MPa
+        # puts rim nodes near/slightly above knee -> lives ~1e6-1e8
+        "knee_stress_mpa": 120.0,
         "knee_life": 1.0e7,
         "slope_high": 9.0,
-        "slope_low": 21.0,
+        "slope_low": 4.0,
     },
 }
 # Uniform mode: a single S-N curve for every zone, equal to the web-zone set.
