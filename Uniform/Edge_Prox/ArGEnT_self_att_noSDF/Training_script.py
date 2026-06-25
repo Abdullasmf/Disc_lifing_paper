@@ -30,7 +30,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # ==== PER-ABLATION CONFIG ====
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
 H5_FILENAME: str = "disc_dataset_edge_proximity_uniform.h5"
-H5_FILENAME: str = "disc_dataset_edge_prox_uniform.h5"
 EXPECTED_REPR: str = "edge_proximity"
 # ==== END PER-ABLATION CONFIG ====
 
