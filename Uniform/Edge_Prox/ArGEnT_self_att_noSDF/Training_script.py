@@ -338,11 +338,13 @@ class AllNodesPadCollate:
             qp_b.append(pts_pad)
             t_b.append(target_pad)
             mask_b.append(m)
+        stacked_mask = torch.stack(mask_b, dim=0)  # [B, maxN] bool
         return {
             "geom_points": torch.stack(gp_b, dim=0),
             "query_points": torch.stack(qp_b, dim=0),
             "target": torch.stack(t_b, dim=0),
-            "mask": torch.stack(mask_b, dim=0),  # [B, maxN] bool
+            "mask": stacked_mask,     # [B, maxN] bool query padding mask
+            "kv_mask": stacked_mask,  # geometry mask == query mask (same padded node set)
         }
 
 
@@ -466,6 +468,7 @@ def train(
         ntrain = 0
         for batch in train_loader:
             pad_mask: Optional[torch.Tensor] = None
+            kv_mask: Optional[torch.Tensor] = None
             if "geom_points" in batch:
                 # Dual-sampling batched mode
                 gp: torch.Tensor = batch["geom_points"].to(device)  # [B,Kenc,2]
@@ -476,6 +479,9 @@ def train(
                 # Extract zero-padding mask from batched_all collate
                 if "mask" in batch:
                     pad_mask = batch["mask"].to(device)  # [B, maxN] bool
+                kv_mask = batch.get("kv_mask", None)
+                if kv_mask is not None:
+                    kv_mask = kv_mask.to(device)  # [B, maxN] bool
             else:
                 # Full-geometry single/batched mode from earlier
                 pts: torch.Tensor = batch["points"].to(device)  # [N,2] or [B,K,2] — fallback path (train_mode != batched_all)
@@ -521,7 +527,7 @@ def train(
             with torch.amp.autocast(
                 "cuda", enabled=(device.type == "cuda" and use_amp)
             ):
-                pred = model(gp, query_xy, pad_mask)  # [B,Kq,2]
+                pred = model(gp, query_xy, pad_mask, kv_mask)  # [B,Kq,2]
                 if pred.shape[-1] != target.shape[-1]:
                     raise RuntimeError(
                         f"Model/data mismatch: pred has {pred.shape[-1]} outputs but target has {target.shape[-1]}"
@@ -740,8 +746,9 @@ def main(preset_name: str = "S0", batch=8) -> None:
         "num_layers": num_layers,
         "output_dim": output_dim,
         "out_channels": NUM_TARGETS,
-        "attention_type": "self",
+        "attention_type": "cross",
         "use_sdf": False,
+        "in_ch_geom": len(INPUT_COLS),
         "in_channels": len(INPUT_COLS),
         "input_cols": INPUT_COLS,
         "target_names": TARGET_NAMES,
@@ -750,7 +757,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         json.dumps(arch_for_hash, sort_keys=True).encode("utf-8")
     ).hexdigest()[:8]
     save_dir = Path(project_dir, "Trained_models")
-    base_name = model_name if model_name else "argent_self_nosdf"
+    base_name = model_name if model_name else "argent_cross_nosdf"
     save_path = save_dir / f"{base_name}_{arch_hash}.pt"
 
     set_seed(42)
@@ -840,9 +847,9 @@ def main(preset_name: str = "S0", batch=8) -> None:
 
     # Build architecture config from flags
     print(
-        f"Building ArGEnTDeepONet (self-attention, no SDF): "
+        f"Building ArGEnTDeepONet (cross-attention, no SDF): "
         f"hidden_dim={hidden_dim}, num_heads={num_heads}, "
-        f"num_layers={num_layers}, output_dim={output_dim}."
+        f"num_layers={num_layers}, output_dim={output_dim}, in_ch_geom={len(INPUT_COLS)}."
     )
 
     model = ArGEnTDeepONet(
@@ -851,8 +858,9 @@ def main(preset_name: str = "S0", batch=8) -> None:
         num_layers=num_layers,
         output_dim=output_dim,
         out_channels=NUM_TARGETS,
-        attention_type="self",
+        attention_type="cross",
         use_sdf=False,
+        in_ch_geom=len(INPUT_COLS),
     )
     parameter_count = sum(p.numel() for p in model.parameters())
     print(f"Model parameter count: {parameter_count:,}")
