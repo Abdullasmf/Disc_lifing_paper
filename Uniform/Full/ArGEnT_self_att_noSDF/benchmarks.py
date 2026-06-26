@@ -730,7 +730,8 @@ class ArGEnTDeepONet(nn.Module):
         output_dim: int = 128,
         out_channels: int = 1,
         attention_type: str = "cross",
-        use_sdf: bool = True,
+        use_sdf: bool = False,
+        in_ch_geom: int = 2,
     ) -> None:
         super().__init__()
         assert hidden_dim % num_heads == 0
@@ -747,10 +748,17 @@ class ArGEnTDeepONet(nn.Module):
         self.use_sdf = use_sdf
 
         # Input channel counts
-        in_ch_query = 2  # self-attention: (x, y) only, no SDF
+        in_ch_query = 2  # query is always normalised (x, r)
+        self.in_ch_geom = in_ch_geom
 
         # ── TRUNK (ArGEnT) ──────────────────────────────────────────────────
         self.proj_mlp = _PointwiseMLP(in_ch_query, hidden_dim, n_hidden=4)
+
+        # Geometry projector: only needed for the cross-attention path, where the
+        # geometric point cloud provides Keys / Values.
+        if attention_type == "cross":
+            in_ch_geom_local = in_ch_geom
+            self.geom_proj_mlp = _PointwiseMLP(in_ch_geom_local, hidden_dim, n_hidden=4)
 
         self.attn_layers = nn.ModuleList(
             [_GalerkinAttentionLayer(hidden_dim, num_heads) for _ in range(num_layers)]
@@ -778,13 +786,15 @@ class ArGEnTDeepONet(nn.Module):
             "out_channels": self.out_channels,
             "attention_type": self.attention_type,
             "use_sdf": self.use_sdf,
+            "in_ch_geom": self.in_ch_geom,
         }
 
     def forward(
         self,
-        geom_points: torch.Tensor,   # [B, N, in_ch_geom] – not used for self-attention
+        geom_points: torch.Tensor,   # [B, N, in_ch_geom]
         query_points: torch.Tensor,  # [B, Q, 2]
-        mask: Optional[torch.Tensor] = None,  # [B, Q] bool: True=real, False=zero-padded
+        mask: Optional[torch.Tensor] = None,     # [B, Q] bool: query padding mask
+        kv_mask: Optional[torch.Tensor] = None,  # [B, N] bool: geometry padding mask
     ) -> torch.Tensor:
         """Returns [B, Q, out_channels]."""
         B, Q_len, _ = query_points.shape
@@ -792,15 +802,28 @@ class ArGEnTDeepONet(nn.Module):
         # Spatial (x, y) coordinates for RoPE
         query_coords = query_points[..., :2]  # [B, Q, 2]
 
-        # ── TRUNK (self-attention; geom_points is not used) ─────────────────
-        q = self.proj_mlp(query_points)  # [B, Q, hidden_dim]
+        if self.attention_type == "cross":
+            # ── TRUNK (cross-attention; geometry provides Keys / Values) ────
+            g = self.geom_proj_mlp(geom_points)   # [B, N, hidden_dim]
+            geom_coords = geom_points[..., :2]    # [B, N, 2] spatial coords for RoPE
+            q = self.proj_mlp(query_points)       # [B, Q, hidden_dim]
 
-        # Zero out padded positions at the start
-        if mask is not None:
-            q = q * mask.unsqueeze(-1).to(q.dtype)
+            # Zero out padded query positions at the start
+            if mask is not None:
+                q = q * mask.unsqueeze(-1).to(q.dtype)
 
-        for attn in self.attn_layers:
-            q = q + attn(q, q, query_coords, query_coords, kv_mask=mask, q_mask=mask)
+            for attn in self.attn_layers:
+                q = q + attn(q, g, query_coords, geom_coords, kv_mask=kv_mask, q_mask=mask)
+        else:
+            # ── TRUNK (self-attention; geom_points is not used) ─────────────
+            q = self.proj_mlp(query_points)  # [B, Q, hidden_dim]
+
+            # Zero out padded positions at the start
+            if mask is not None:
+                q = q * mask.unsqueeze(-1).to(q.dtype)
+
+            for attn in self.attn_layers:
+                q = q + attn(q, q, query_coords, query_coords, kv_mask=mask, q_mask=mask)
 
         # Residual output MLP
         q_res = self.out_mlp(q.reshape(-1, self.hidden_dim)).view(B, Q_len, self.hidden_dim)
