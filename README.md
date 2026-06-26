@@ -68,7 +68,30 @@ The training script asserts the H5 file's stored `representation` attribute equa
 ## Model families
 
 - **`PointNetMLPJoint`** — a 2D PointNet++ encoder (`PointNet2Encoder2D`, parametrised `in_channels = len(INPUT_COLS)`) feeding a joint MLP head that regresses all targets together. Architecture is selected from named presets in `model_presets.json`. `Training_script.py` uses an MSE/L2 objective; `Training_script_L1.py` uses L1.
-- **`ArGEnT_self_att_noSDF`** — `ArGEnTDeepONet` configured with `attention_type="self", use_sdf=False`: a Galerkin self-attention operator network over the query coordinates `(x, r)` with no branch network and no SDF channel. `out_channels = NUM_TARGETS`.
+- **`ArGEnT_self_att_noSDF`** — `ArGEnTDeepONet` configured with `attention_type="self", use_sdf=False`: a Galerkin self-attention operator network. See the section below for how `INPUT_COLS` map to the ArGEnT encoder vs. query streams.
+
+## ArGEnT input design: geometry stream vs. query stream
+
+ArGEnT (Arbitrary Geometry-encoded Transformer, see the companion paper) treats geometry encoding and query evaluation as **two separate, architecturally distinct streams**. This separation is intentional and consistent with the original paper's formulation — it is not a bug.
+
+### Why the streams carry different features
+
+| Stream | Role | What it carries | How it is parametrised |
+|--------|------|-----------------|------------------------|
+| **Geometry / KV stream** (`geom_points`) | Encodes the *shape* of the disc cross-section — the only quantity that varies across training samples | All `INPUT_COLS`, i.e. `(x, r)` plus any extra geometric descriptors (arc-length, zone_id, curvature, …) | `in_ch_geom = len(INPUT_COLS)` — widens automatically with the ablation |
+| **Query / trunk stream** (`points`) | Asks "what is stress/life *at this spatial location*?" | Always `(x, r)` only (`QUERY_COLS = [0, 1]`) | `in_ch_query = 2`, fixed | 
+
+This design follows directly from the operator-learning formulation in the paper. The learned operator maps `G(x, φ)` where `x` are the query coordinates and `φ` is the geometry; the two are independent inputs with independent projections. Arc-length, zone_id, and curvature are **properties of the boundary curve**, not of an arbitrary interior evaluation point, so they belong in the geometry stream only.
+
+### Why no branch network is used
+
+In the paper's `ArGEnTDeepONet` framework, a branch network handles non-geometric inputs such as varying boundary conditions or operating parameters. In this problem, **boundary conditions and loading are identical across all samples** — only the disc geometry changes. There is therefore no non-geometric parameter to pass through a branch network, and `ArGEnTDeepONet` is used without one.
+
+### Consequence for the ablation interpretation
+
+The `Edge_arc`, `Edge_arc_feat`, and `Edge_zoneID` ablations for the ArGEnT family test whether richer **geometry encoding** improves prediction accuracy — they do not test whether those features improve the query MLP, because the query stream purposefully carries only spatial coordinates. The PointNet family is symmetric in this regard because its encoder directly consumes `INPUT_COLS` with no separate query stream.
+
+> **Note on the self-attention variant specifically:** The `ArGEnT_self_att_noSDF` architecture passes `geom_points` and `points` (the query) as the same set of tokens into the self-attention block. In `benchmarks.py` the self-attention forward pass projects the query tensor (`in_ch_query = 2`) and the geometry tensor (`in_ch_geom = len(INPUT_COLS)`) through separate point-wise MLPs before combining them. The geometry-stream projection does consume all `INPUT_COLS`; only the query-stream projection is fixed at 2 channels.
 
 ## Datasets and the `Data_gen` pipeline
 
@@ -105,7 +128,7 @@ On resume the normalization stats — including `extra_feat_stats` — are reloa
 
 ## Known issues / limitations
 
-- **ArGEnT self-attention ignores the geometry channels.** The `ArGEnTDeepONet` self-attention/no-SDF variant builds its only learned input projection from the query coordinates `(x, r)` (`in_ch_query = 2`, hardcoded in `benchmarks.py`); `geom_points` is passed in but never consumed in the forward pass. Consequently the wider-input ablations do **not** crash for ArGEnT, but the extra encoder features (arc-length, zone_id, extra geometric features) have **no effect** on the ArGEnT model. For this family, `Edge`, `Edge_arc`, `Edge_arc_feat`, and `Edge_zoneID` are effectively the same model and should not be interpreted as a true input-feature ablation. The PointNet family does consume `INPUT_COLS` via its `in_channels`-parametrised encoder. `benchmarks.py` is intentionally left unmodified.
+- **ArGEnT query stream is intentionally fixed at 2 channels.** `QUERY_COLS = [0, 1]` in every `Training_script.py` is by design (see the ArGEnT input design section above). The query stream always receives only `(x, r)` regardless of `INPUT_COLS`. Extra geometric features are routed to the geometry/KV stream only. This is consistent with the ArGEnT paper's operator-learning formulation and with the fact that arc-length, curvature, and zone_id are boundary-curve properties, not properties of an interior evaluation point.
 - **Cannot be validated in this environment.** There is no PyTorch runtime and no `.h5` data available in the sandbox, so the scripts have only been verified to compile (`py_compile`) and audited statically. End-to-end training, checkpoint resume, and the H5 representation/width assertions have not been executed against real data.
 
 ## Synthetic dataset generator (`Data_gen`)
