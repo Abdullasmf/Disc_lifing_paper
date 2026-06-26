@@ -817,7 +817,11 @@
         "life_weight_gamma": 0.7,
         "model_name": "pn_l_full_ln_pos12_weighted_aggressive",
         "norm": "layer",
-        "posenc": [
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
             128,
             128
         ],
@@ -849,6 +853,1736 @@
             0.5,
             1.5
         ]
+    },
+    "L_full_ln_pos12_weighted_aggressive_uncertainty": {
+        "gf_hidden": [
+            128
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            512,
+            512,
+            256
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 192,
+        "life_weight_clip": [
+            0.3,
+            8.0
+        ],
+        "life_weight_gamma": 0.7,
+        "model_name": "pn_l_full_ln_pos12_weighted_aggressive",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            128,
+            128
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    128,
+                    128
+                ],
+                "n_samples": 0,
+                "out_ch": 256,
+                "radius": 0.02
+            },
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    256
+                ],
+                "n_samples": 0,
+                "out_ch": 512,
+                "radius": 0.05
+            }
+        ],
+        "train_batch_size": 4,
+        "train_points_per_geom": 4096,
+        "use_uncertainty_weighting": true,
+        "use_weighted_loss": false,
+        "weight_per_target": [
+            0.5,
+            1.5
+        ]
+    },
+    "L_full_ln_pos12_weighted_balanced": {
+        "gf_hidden": [
+            128
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            512,
+            512,
+            256
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 192,
+        "life_weight_clip": [
+            0.5,
+            5.0
+        ],
+        "life_weight_gamma": 0.5,
+        "model_name": "pn_l_full_ln_pos12_weighted_balanced",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            128,
+            128
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    128,
+                    128
+                ],
+                "n_samples": 0,
+                "out_ch": 256,
+                "radius": 0.02
+            },
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    256
+                ],
+                "n_samples": 0,
+                "out_ch": 512,
+                "radius": 0.05
+            }
+        ],
+        "train_batch_size": 4,
+        "train_points_per_geom": 4096,
+        "use_weighted_loss": true,
+        "weight_per_target": [
+            1.0,
+            1.0
+        ]
+    },
+    "L_full_ln_pos12_weighted_balanced_uncertainty": {
+        "gf_hidden": [
+            128
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            512,
+            512,
+            256
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 192,
+        "life_weight_clip": [
+            0.5,
+            5.0
+        ],
+        "life_weight_gamma": 0.5,
+        "model_name": "pn_l_full_ln_pos12_weighted_balanced",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            128,
+            128
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    128,
+                    128
+                ],
+                "n_samples": 0,
+                "out_ch": 256,
+                "radius": 0.02
+            },
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    256
+                ],
+                "n_samples": 0,
+                "out_ch": 512,
+                "radius": 0.05
+            }
+        ],
+        "train_batch_size": 4,
+        "train_points_per_geom": 4096,
+        "use_uncertainty_weighting": true,
+        "use_weighted_loss": false,
+        "weight_per_target": [
+            1.0,
+            1.0
+        ]
+    },
+    "L_full_ln_pos24_drop": {
+        "gf_hidden": [
+            128
+        ],
+        "head_dropout": 0.3,
+        "head_hidden": [
+            512,
+            512,
+            256
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 24,
+            "scale": 1.0
+        },
+        "latent_dim": 192,
+        "model_name": "pn_l_full_ln_pos24_drop",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 24,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            128,
+            128
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    128,
+                    128
+                ],
+                "n_samples": 0,
+                "out_ch": 256,
+                "radius": 0.02
+            },
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    256
+                ],
+                "n_samples": 0,
+                "out_ch": 512,
+                "radius": 0.05
+            }
+        ],
+        "train_batch_size": 4,
+        "train_points_per_geom": 4096
+    },
+    "L_full_ln_pos8_drop": {
+        "gf_hidden": [
+            128
+        ],
+        "head_dropout": 0.3,
+        "head_hidden": [
+            512,
+            512,
+            256
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 8,
+            "scale": 1.0
+        },
+        "latent_dim": 192,
+        "model_name": "pn_l_full_ln_pos8_drop",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 8,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            128,
+            128
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    128,
+                    128
+                ],
+                "n_samples": 0,
+                "out_ch": 256,
+                "radius": 0.02
+            },
+            {
+                "max_k": 48,
+                "mlp_hidden": [
+                    256
+                ],
+                "n_samples": 0,
+                "out_ch": 512,
+                "radius": 0.05
+            }
+        ],
+        "train_batch_size": 4,
+        "train_points_per_geom": 4096
+    },
+    "M_full": {
+        "gf_hidden": [
+            96
+        ],
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "batch",
+        "head_posenc": {
+            "n_freqs": 0,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full",
+        "norm": "batch",
+        "posenc": {
+            "n_freqs": 0,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 0,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 0,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos12",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12_drop": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.25,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos12_drop",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12_enc_only": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 0,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos12_enc_only",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12_head24": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 24,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos12_head24",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12_head32": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 32,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos12_head32",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12_head_only": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos12_head_only",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 0,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12_r001": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos12_r001",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.01
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12_r001_weighted_aggressive": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.3,
+            8.0
+        ],
+        "life_weight_gamma": 0.7,
+        "model_name": "pn_m_full_ln_pos12_r001_weighted_aggressive",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.01
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_weighted_loss": true,
+        "weight_per_target": [
+            0.5,
+            1.5
+        ]
+    },
+    "M_full_ln_pos12_r001_weighted_aggressive_uncertainty": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.3,
+            8.0
+        ],
+        "life_weight_gamma": 0.7,
+        "model_name": "pn_m_full_ln_pos12_r001_weighted_aggressive",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.01
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_uncertainty_weighting": true,
+        "use_weighted_loss": false,
+        "weight_per_target": [
+            0.5,
+            1.5
+        ]
+    },
+    "M_full_ln_pos12_r001_weighted_balanced": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.5,
+            5.0
+        ],
+        "life_weight_gamma": 0.5,
+        "model_name": "pn_m_full_ln_pos12_r001_weighted_balanced",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.01
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_weighted_loss": true,
+        "weight_per_target": [
+            1.0,
+            1.0
+        ]
+    },
+    "M_full_ln_pos12_r001_weighted_balanced_uncertainty": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.5,
+            5.0
+        ],
+        "life_weight_gamma": 0.5,
+        "model_name": "pn_m_full_ln_pos12_r001_weighted_balanced",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.01
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_uncertainty_weighting": true,
+        "use_weighted_loss": false,
+        "weight_per_target": [
+            1.0,
+            1.0
+        ]
+    },
+    "M_full_ln_pos12_r005": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos12_r005",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.005
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos12_weighted_aggressive": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.3,
+            8.0
+        ],
+        "life_weight_gamma": 0.7,
+        "model_name": "pn_m_full_ln_pos12_weighted_aggressive",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_weighted_loss": true,
+        "weight_per_target": [
+            0.5,
+            1.5
+        ]
+    },
+    "M_full_ln_pos12_weighted_aggressive_uncertainty": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.3,
+            8.0
+        ],
+        "life_weight_gamma": 0.7,
+        "model_name": "pn_m_full_ln_pos12_weighted_aggressive",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_uncertainty_weighting": true,
+        "use_weighted_loss": false,
+        "weight_per_target": [
+            0.5,
+            1.5
+        ]
+    },
+    "M_full_ln_pos12_weighted_balanced": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.5,
+            5.0
+        ],
+        "life_weight_gamma": 0.5,
+        "model_name": "pn_m_full_ln_pos12_weighted_balanced",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_weighted_loss": true,
+        "weight_per_target": [
+            1.0,
+            1.0
+        ]
+    },
+    "M_full_ln_pos12_weighted_balanced_uncertainty": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.5,
+            5.0
+        ],
+        "life_weight_gamma": 0.5,
+        "model_name": "pn_m_full_ln_pos12_weighted_balanced",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_uncertainty_weighting": true,
+        "use_weighted_loss": false,
+        "weight_per_target": [
+            1.0,
+            1.0
+        ]
+    },
+    "M_full_ln_pos12_weighted_lowlife_boost": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.25,
+            10.0
+        ],
+        "life_weight_gamma": 0.85,
+        "model_name": "pn_m_full_ln_pos12_weighted_lowlife_boost",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_weighted_loss": true,
+        "weight_per_target": [
+            0.4,
+            1.8
+        ]
+    },
+    "M_full_ln_pos12_weighted_lowlife_boost_uncertainty": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.25,
+            10.0
+        ],
+        "life_weight_gamma": 0.85,
+        "model_name": "pn_m_full_ln_pos12_weighted_lowlife_boost",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_uncertainty_weighting": true,
+        "use_weighted_loss": false,
+        "weight_per_target": [
+            0.4,
+            1.8
+        ]
+    },
+    "M_full_ln_pos12_weighted_lowlife_extreme": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.2,
+            12.0
+        ],
+        "life_weight_gamma": 1.0,
+        "model_name": "pn_m_full_ln_pos12_weighted_lowlife_extreme",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_weighted_loss": true,
+        "weight_per_target": [
+            0.3,
+            2.0
+        ]
+    },
+    "M_full_ln_pos12_weighted_lowlife_extreme_uncertainty": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "life_weight_clip": [
+            0.2,
+            12.0
+        ],
+        "life_weight_gamma": 1.0,
+        "model_name": "pn_m_full_ln_pos12_weighted_lowlife_extreme",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 12,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096,
+        "use_uncertainty_weighting": true,
+        "use_weighted_loss": false,
+        "weight_per_target": [
+            0.3,
+            2.0
+        ]
+    },
+    "M_full_ln_pos24": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 24,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos24",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 24,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos4": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 4,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos4",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 4,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos4_drop": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.25,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 4,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos4_drop",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 4,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos8": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.0,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 8,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos8",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 8,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
+    },
+    "M_full_ln_pos8_drop": {
+        "gf_hidden": [
+            96
+        ],
+        "head_dropout": 0.25,
+        "head_hidden": [
+            384,
+            384,
+            192
+        ],
+        "head_norm": "layer",
+        "head_posenc": {
+            "n_freqs": 8,
+            "scale": 1.0
+        },
+        "latent_dim": 160,
+        "model_name": "pn_m_full_ln_pos8_drop",
+        "norm": "layer",
+        "posenc": {
+            "n_freqs": 8,
+            "scale": 1.0
+        },
+        "pre_hidden": [
+            96,
+            96
+        ],
+        "sa_blocks": [
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    96
+                ],
+                "n_samples": 0,
+                "out_ch": 192,
+                "radius": 0.02
+            },
+            {
+                "max_k": 40,
+                "mlp_hidden": [
+                    192
+                ],
+                "n_samples": 0,
+                "out_ch": 384,
+                "radius": 0.06
+            }
+        ],
+        "train_batch_size": 6,
+        "train_points_per_geom": 4096
     },
     "S_full_ln_pos12": {
         "gf_hidden": [
