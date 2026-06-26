@@ -52,7 +52,7 @@ ENV/
 *.ldhi
 *.rdb
 *.txt
-*.sh
+
 *.xlsx
 *.csv
 
@@ -62,9 +62,7 @@ ENV/
 *.jpeg
 
 
-# Misc
-MPOS_Data_Download.xlsx
-Partnumbers_SAP_DATA_with_longtext.xlsx
+
 
 
 DesignPointLog.csv
@@ -75,4 +73,4 @@ Expressions.xls
 
 *.h5
 *.dsco
-ANSYS/Modify_rst/Test.ipynb
+
