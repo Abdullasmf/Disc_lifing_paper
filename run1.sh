@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --mem-per-cpu=2G
+#SBATCH --mem-per-cpu=8G
 #SBATCH --cpus-per-task=1
 echo "PN model training!"
 echo "loading modules"

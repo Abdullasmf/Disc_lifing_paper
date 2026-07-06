@@ -55,32 +55,32 @@ NOMINAL_GEOMETRY_MM: Dict[str, float] = {
     "upper_fillet_radius": 2.6,
 }
 
-MIN_OFFSET_MM: Dict[str, float] = {
-    "bore_radius_inner":        -0.5,
-    "bore_height":              -0.5,
-    "bore_thickness":           -0.8,
-    "lower_transition_height":  -0.4,
-    "web_height":               -1.0,
-    "web_thickness":            -0.5,
-    "upper_transition_height":  -0.4,
-    "rim_height":               -0.8,
-    "rim_thickness":            -0.8,
-    "lower_fillet_radius":      -0.3,
-    "upper_fillet_radius":      -0.3,
+MIN_OFFSET_MM = {
+    "bore_radius_inner":      -1.5,
+    "bore_height":            -1.0,
+    "bore_thickness":         -2.0,
+    "lower_transition_height":-1.0,
+    "web_height":             -3.0,
+    "web_thickness":          -1.5,
+    "upper_transition_height":-1.0,
+    "rim_height":             -2.0,
+    "rim_thickness":          -2.0,
+    "lower_fillet_radius":    -0.5,
+    "upper_fillet_radius":    -0.5,
 }
 
-MAX_OFFSET_MM: Dict[str, float] = {
-    "bore_radius_inner":        +0.5,
-    "bore_height":              +0.5,
-    "bore_thickness":           +0.8,
-    "lower_transition_height":  +0.4,
-    "web_height":               +1.0,
-    "web_thickness":            +0.5,
-    "upper_transition_height":  +0.4,
-    "rim_height":               +0.8,
-    "rim_thickness":            +0.8,
-    "lower_fillet_radius":      +0.3,
-    "upper_fillet_radius":      +0.3,
+MAX_OFFSET_MM = {
+    "bore_radius_inner":      +1.5,
+    "bore_height":            +1.0,
+    "bore_thickness":         +2.0,
+    "lower_transition_height":+1.0,
+    "web_height":             +3.0,
+    "web_thickness":          +1.5,
+    "upper_transition_height":+1.0,
+    "rim_height":             +2.0,
+    "rim_thickness":          +2.0,
+    "lower_fillet_radius":    +0.5,
+    "upper_fillet_radius":    +0.5,
 }
 REPRESENTATIONS = ("edge", "edge_proximity", "full")
 THICKNESS_ORDERING_GAP_MM = 0.5
