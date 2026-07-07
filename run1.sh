@@ -22,32 +22,32 @@ conda activate /usr1/home/abdulla.fathalla/.aixvipmap/envs/MLEnv
 echo "starting script"
 
 echo "===============================Zonal-Edge-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Zonal/Edge/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Zonal/Edge/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Zonal-Edge-Arc-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Zonal/Edge_arc/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Zonal/Edge_arc/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Zonal-Edge-Arc-Feature-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Zonal/Edge_arc_feat/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Zonal/Edge_arc_feat/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Zonal-Edge-No-Stress-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Zonal/Edge_no_stress/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Zonal/Edge_no_stress/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Zonal-Edge-Proximity-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Zonal/Edge_Prox/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Zonal/Edge_Prox/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Zonal-Edge-ZoneID-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Zonal/Edge_zoneID/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Zonal/Edge_zoneID/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Zonal-Full-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Zonal/Full/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Zonal/Full/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 
 echo "CHANGING TO UNIFORM DATASET"
 echo "===============================Uniform-Edge-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Uniform/Edge/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Uniform/Edge/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Uniform-Edge-Arc-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Uniform/Edge_arc/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Uniform/Edge_arc/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Uniform-Edge-Arc-Feature-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Uniform/Edge_arc_feat/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Uniform/Edge_arc_feat/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Uniform-Edge-No-Stress-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Uniform/Edge_no_stress/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Uniform/Edge_no_stress/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Uniform-Edge-Proximity-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Uniform/Edge_Prox/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Uniform/Edge_Prox/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 echo "===============================Uniform-Full-PointNetMLPJoint==============================="
-python -u Disc_lifing_paper/Uniform/Full/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 1
+python -u Disc_lifing_paper/Uniform/Full/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos8 --initial-batch 4
 
 echo "DONE"

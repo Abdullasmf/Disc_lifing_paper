@@ -28,7 +28,7 @@ def run_with_fallback(preset: str, initial_batch: int) -> bool:
     iterative = max(1, int(initial_batch * 0.1))
     batch_plan = list(range(initial_batch, 0, -iterative))
     batch_plan.append(1)
-    batch_plan = [1]
+    # REMOVED: batch_plan = [1]  (was overriding initial_batch, forcing batch=1 always)
     for b in batch_plan:
         try:
             print(f"\n[GPU0] Preset={preset} | Trying batch={b}")
