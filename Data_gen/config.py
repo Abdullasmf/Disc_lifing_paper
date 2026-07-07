@@ -56,31 +56,31 @@ NOMINAL_GEOMETRY_MM: Dict[str, float] = {
 }
 
 MIN_OFFSET_MM = {
-    "bore_radius_inner":      -1.5,
-    "bore_height":            -1.0,
-    "bore_thickness":         -2.0,
-    "lower_transition_height":-1.0,
-    "web_height":             -3.0,
-    "web_thickness":          -1.5,
-    "upper_transition_height":-1.0,
-    "rim_height":             -2.0,
-    "rim_thickness":          -2.0,
-    "lower_fillet_radius":    -0.5,
-    "upper_fillet_radius":    -0.5,
+    "bore_radius_inner":       -4.0,
+    "bore_height":             -2.5,
+    "bore_thickness":          -6.0,
+    "lower_transition_height": -2.0,
+    "web_height":              -8.0,
+    "web_thickness":           -2.0,
+    "upper_transition_height": -2.0,
+    "rim_height":              -3.5,
+    "rim_thickness":           -4.0,
+    "lower_fillet_radius":     -1.2,
+    "upper_fillet_radius":     -1.2,
 }
 
 MAX_OFFSET_MM = {
-    "bore_radius_inner":      +1.5,
-    "bore_height":            +1.0,
-    "bore_thickness":         +2.0,
-    "lower_transition_height":+1.0,
-    "web_height":             +3.0,
-    "web_thickness":          +1.5,
-    "upper_transition_height":+1.0,
-    "rim_height":             +2.0,
-    "rim_thickness":          +2.0,
-    "lower_fillet_radius":    +0.5,
-    "upper_fillet_radius":    +0.5,
+    "bore_radius_inner":       +4.0,
+    "bore_height":             +2.5,
+    "bore_thickness":          +6.0,
+    "lower_transition_height": +2.0,
+    "web_height":              +8.0,
+    "web_thickness":           +2.0,
+    "upper_transition_height": +2.0,
+    "rim_height":              +3.5,
+    "rim_thickness":           +4.0,
+    "lower_fillet_radius":     +1.2,
+    "upper_fillet_radius":     +1.2,
 }
 REPRESENTATIONS = ("edge", "edge_proximity", "full")
 THICKNESS_ORDERING_GAP_MM = 0.5

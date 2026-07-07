@@ -421,17 +421,12 @@ def train(
     target_std_d = target_std.to(device)
 
     # Learning rate schedule (optional OneCycleLR based on rough steps)
-    steps_per_epoch = max(1, len(train_loader))
-    scheduler = optim.lr_scheduler.OneCycleLR(
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        max_lr=lr,
-        epochs=epochs,
-        steps_per_epoch=steps_per_epoch,
-        pct_start=0.3,
-        div_factor=10.0,
-        final_div_factor=10.0,
-        anneal_strategy="cos",
-        three_phase=False,
+        mode="min",
+        factor=0.5,
+        patience=20,
+        min_lr=1e-6,
     )
 
     t0 = time.time()
@@ -550,7 +545,6 @@ def train(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
 
             train_loss += loss.item() * Bmul
             ntrain += Bmul
@@ -597,6 +591,7 @@ def train(
                 count_val_points += int(N)
                 nval += N
         val_loss /= max(1, nval)
+        scheduler.step(val_loss)
         if count_val_points > 0:
             val_mse = (se_sum / count_val_points).tolist()
             r2_vals: List[float] = []
@@ -617,7 +612,7 @@ def train(
 
         print(
             f"Epoch {epoch:03d} | train MSE: {train_loss:.6f} | val MSE: {val_loss:.6f} | "
-            f"{metrics_str} | lr: {scheduler.get_last_lr()[0]:.2e} | epoch: {epoch_dt:.1f}s"
+            f"{metrics_str} | lr: {optimizer.param_groups[0]["lr"]:.2e} | epoch: {epoch_dt:.1f}s"
         )
 
         train_history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})

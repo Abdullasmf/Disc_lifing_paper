@@ -541,17 +541,12 @@ def train(
     target_std_d = target_std.to(device)  # [2]
 
     # Learning rate schedule (optional OneCycleLR based on rough steps)
-    steps_per_epoch = max(1, len(train_loader))
-    scheduler = optim.lr_scheduler.OneCycleLR(
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        max_lr=lr,
-        epochs=epochs,
-        steps_per_epoch=steps_per_epoch,
-        pct_start=0.1,
-        div_factor=10.0,
-        final_div_factor=10.0,
-        anneal_strategy="cos",
-        three_phase=False,
+        mode="min",
+        factor=0.5,
+        patience=20,
+        min_lr=1e-6,
     )
 
     if resume_checkpoint is not None and "scheduler_state" in resume_checkpoint:
@@ -665,13 +660,7 @@ def train(
 
             scaler.step(optimizer)
 
-            # Only step scheduler if optimizer step was not skipped (scale didn't decrease)
-            scale_before = scaler.get_scale()
             scaler.update()
-            scale_after = scaler.get_scale()
-
-            if scale_after >= scale_before:
-                scheduler.step()
 
             train_loss += loss.item() * Bmul
             ntrain += float(Bmul)
@@ -751,6 +740,8 @@ def train(
 
         val_loss /= max(1, nval)
 
+        scheduler.step(val_loss)
+
         # Compute per-target R2/MSE in raw spaces
         if count_val_points > 0:
             val_mse = (se_sum / count_val_points).tolist()
@@ -781,7 +772,7 @@ def train(
         life_metrics_str = " | ".join(life_metrics_parts) if life_metrics_parts else "(no quantile data)"
 
         print(
-            f"Ep {epoch:03d} | L_tot: {train_loss:.4f}/{val_loss:.4f} | {metrics_str} | lr: {scheduler.get_last_lr()[0]:.2e} | {epoch_dt:.1f}s"
+            f"Ep {epoch:03d} | L_tot: {train_loss:.4f}/{val_loss:.4f} | {metrics_str} | lr: {optimizer.param_groups[0]["lr"]:.2e} | {epoch_dt:.1f}s"
         )
         print(f"         | Life quantiles: {life_metrics_str}")
 
@@ -796,7 +787,7 @@ def train(
                 "target_names": target_names,
                 "val_r2": val_r2_map,
                 "val_mse": val_mse_map,
-                "lr": float(scheduler.get_last_lr()[0]),
+                "lr": float(optimizer.param_groups[0]["lr"]),
             }
         )
 

@@ -73,4 +73,7 @@ Expressions.xls
 
 *.h5
 *.dsco
+*.bak
+*.sha256
 
+Data_gen/output/checksums.sha256
