@@ -612,7 +612,7 @@ def train(
         metrics_str = " | ".join(metric_parts)
 
         print(
-            f"Ep {epoch:03d} | L_tot: {train_loss:.4f}/{val_loss:.4f} | {metrics_str} | lr: {optimizer.param_groups[0]["lr"]:.2e} | {epoch_dt:.1f}s"
+            f"Ep {epoch:03d} | L_tot: {train_loss:.4f}/{val_loss:.4f} | {metrics_str} | lr: {optimizer.param_groups[0]['lr']:.2e} | {epoch_dt:.1f}s"
         )
 
         val_mse_map = {name: float(mse_j) for name, mse_j in zip(target_names, val_mse)}
@@ -626,7 +626,7 @@ def train(
                 "target_names": target_names,
                 "val_r2": val_r2_map,
                 "val_mse": val_mse_map,
-                "lr": float(optimizer.param_groups[0]["lr"]),
+                "lr": float(optimizer.param_groups[0]['lr']),
             }
         )
 

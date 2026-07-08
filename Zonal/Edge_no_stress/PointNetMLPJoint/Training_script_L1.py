@@ -772,7 +772,7 @@ def train(
         life_metrics_str = " | ".join(life_metrics_parts) if life_metrics_parts else "(no quantile data)"
 
         print(
-            f"Ep {epoch:03d} | L_tot: {train_loss:.4f}/{val_loss:.4f} | {metrics_str} | lr: {optimizer.param_groups[0]["lr"]:.2e} | {epoch_dt:.1f}s"
+            f"Ep {epoch:03d} | L_tot: {train_loss:.4f}/{val_loss:.4f} | {metrics_str} | lr: {optimizer.param_groups[0]['lr']:.2e} | {epoch_dt:.1f}s"
         )
         print(f"         | Life quantiles: {life_metrics_str}")
 
@@ -787,7 +787,7 @@ def train(
                 "target_names": target_names,
                 "val_r2": val_r2_map,
                 "val_mse": val_mse_map,
-                "lr": float(optimizer.param_groups[0]["lr"]),
+                "lr": float(optimizer.param_groups[0]['lr']),
             }
         )
 

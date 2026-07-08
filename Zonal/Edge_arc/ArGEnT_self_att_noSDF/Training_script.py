@@ -612,7 +612,7 @@ def train(
 
         print(
             f"Epoch {epoch:03d} | train MSE: {train_loss:.6f} | val MSE: {val_loss:.6f} | "
-            f"{metrics_str} | lr: {optimizer.param_groups[0]["lr"]:.2e} | epoch: {epoch_dt:.1f}s"
+            f"{metrics_str} | lr: {optimizer.param_groups[0]['lr']:.2e} | epoch: {epoch_dt:.1f}s"
         )
 
         train_history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
