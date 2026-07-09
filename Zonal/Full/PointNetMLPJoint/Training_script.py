@@ -30,7 +30,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
 INPUT_COLS: List[int] = [0, 1]
 H5_FILENAME: str = "disc_dataset_full_zonal.h5"
-EXPECTED_REPR: str = "mesh"
+EXPECTED_REPR: str = "full"
 # ==== END PER-ABLATION CONFIG ====
 
 NUM_TARGETS: int = len(TARGET_NAMES)
