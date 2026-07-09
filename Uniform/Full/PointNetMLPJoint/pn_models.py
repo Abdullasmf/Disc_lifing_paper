@@ -1,3 +1,4 @@
+# [patch_pointnet_features] patched
 from typing import List, Tuple, Optional, Dict, Any
 
 import math
@@ -160,10 +161,12 @@ class SetAbstraction(nn.Module):
         self.mlp = MLP(in_ch + 2, mlp_hidden, out_ch, norm=norm, num_groups=num_groups)
 
     def forward(
-        self, xyz: torch.Tensor, feats: torch.Tensor
+        self, xyz: torch.Tensor, feats: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # xyz: [B,N,2]; feats: [B,N,C]
+        # xyz: [B,N,2]; feats: [B,N,C] or None
         B, N, _ = xyz.shape
+        if feats is None:
+            feats = xyz
         C = feats.shape[-1]
         # If n_samples <= 0 or >= N, treat all points as centers (no subsampling) for full coverage
         if self.n_samples <= 0 or self.n_samples >= N:
@@ -250,7 +253,7 @@ class PointNet2Encoder2D(nn.Module):
         self,
         latent_dim: int = 128,
         encoder_cfg: Optional[Dict[str, Any]] = None,
-        in_channels: int = 2,
+        in_channels: int = 0,
     ):
         super().__init__()
         cfg = dict(encoder_cfg) if encoder_cfg is not None else {}
@@ -286,10 +289,11 @@ class PointNet2Encoder2D(nn.Module):
         num_groups: int = int(cfg.get("num_groups", 16))
         pool_type: str = str(cfg.get("pool", "max"))  # 'max' | 'max+mean'
 
-        # Optional Fourier positional encoding before pre-MLP
+        # Optional Fourier positional encoding on xyz only
         posenc_cfg = cfg.get("posenc", None)
         self.posenc: Optional[FourierFeatures] = None
-        in_ch_pre = self.in_channels
+        xyz_dim = 2
+        xyz_feat_dim = xyz_dim
         if isinstance(posenc_cfg, dict):
             n_freqs = int(posenc_cfg.get("n_freqs", 0))
             scale = float(posenc_cfg.get("scale", 1.0))
@@ -297,9 +301,10 @@ class PointNet2Encoder2D(nn.Module):
                 self.posenc = FourierFeatures(
                     n_freqs=n_freqs, scale=scale, include_input=True
                 )
-                in_ch_pre = self.posenc.out_dim
+                xyz_feat_dim = self.posenc.out_dim
 
-        # Pre pointwise MLP on coords
+        # Pre pointwise MLP on [xyz_encoding, extra_feats]
+        in_ch_pre = xyz_feat_dim + self.in_channels
         pre_layers: List[nn.Module] = []
         dims = [in_ch_pre] + pre_hidden
         for i in range(len(dims) - 1):
@@ -369,8 +374,14 @@ class PointNet2Encoder2D(nn.Module):
                 "scale": float(posenc_cfg.get("scale", 1.0)),
             }
 
-    def forward(self, xyz: torch.Tensor) -> torch.Tensor:
-        x_in = self.posenc(xyz) if self.posenc is not None else xyz
+    def forward(
+        self, xyz: torch.Tensor, feats: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        xyz_in = self.posenc(xyz) if self.posenc is not None else xyz
+        if feats is not None and feats.numel() > 0:
+            x_in = torch.cat([xyz_in, feats], dim=-1)
+        else:
+            x_in = xyz_in
         feats = self.pre(x_in)
         centers = xyz
         for sa in self.sa_layers:
@@ -387,7 +398,7 @@ class PointNetMLPJoint(nn.Module):
         mlp_hidden: Optional[List[int]] = None,
         out_dim: int = 1,
         encoder_cfg: Optional[Dict[str, Any]] = None,
-        in_channels: int = 2,
+        in_channels: int = 0,
     ):
         super().__init__()
         # Encoder (cfg latent_dim overrides arg if provided)
@@ -453,9 +464,12 @@ class PointNetMLPJoint(nn.Module):
         return dict(self._arch)
 
     def forward(
-        self, geom_points: torch.Tensor, query_points: torch.Tensor
+        self,
+        geom_xyz: torch.Tensor,
+        query_points: torch.Tensor,
+        geom_feats: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        z = self.encoder(geom_points)  # [B,L]
+        z = self.encoder(geom_xyz, geom_feats)  # [B,L]
         B, Q, _ = query_points.shape
         q_feat = (
             self.head_posenc(query_points)

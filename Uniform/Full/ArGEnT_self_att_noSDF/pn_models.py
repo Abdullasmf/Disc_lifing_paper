@@ -1,3 +1,4 @@
+# [patch_pointnet_features] patched
 from typing import List, Tuple, Optional, Dict, Any
 
 import math
@@ -160,10 +161,12 @@ class SetAbstraction(nn.Module):
         self.mlp = MLP(in_ch + 2, mlp_hidden, out_ch, norm=norm, num_groups=num_groups)
 
     def forward(
-        self, xyz: torch.Tensor, feats: torch.Tensor
+        self, xyz: torch.Tensor, feats: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # xyz: [B,N,2]; feats: [B,N,C]
+        # xyz: [B,N,2]; feats: [B,N,C] or None
         B, N, _ = xyz.shape
+        if feats is None:
+            feats = xyz
         C = feats.shape[-1]
         # If n_samples <= 0 or >= N, treat all points as centers (no subsampling) for full coverage
         if self.n_samples <= 0 or self.n_samples >= N:
@@ -492,9 +495,12 @@ class PointNetMLPJoint(nn.Module):
         return dict(self._arch)
 
     def forward(
-        self, geom_points: torch.Tensor, query_points: torch.Tensor
+        self,
+        geom_xyz: torch.Tensor,
+        query_points: torch.Tensor,
+        geom_feats: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        z = self.encoder(geom_points)  # [B,L]
+        z = self.encoder(geom_xyz, geom_feats)  # [B,L]
         B, Q, _ = query_points.shape
         q_feat = (
             self.head_posenc(query_points)

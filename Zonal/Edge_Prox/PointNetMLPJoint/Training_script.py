@@ -1,3 +1,4 @@
+# [patch_pointnet_features] dataset/model path patched
 import random
 import json
 import hashlib
@@ -28,7 +29,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ==== PER-ABLATION CONFIG ====
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
-INPUT_COLS: List[int] = [0, 1]
+INPUT_COLS: List[int] = [0, 1]  # legacy, kept for compatibility
+EXTRA_FEAT_COLS: List[int] = []
 H5_FILENAME: str = "disc_dataset_edge_proximity_zonal.h5"
 EXPECTED_REPR: str = "edge_proximity"
 # ==== END PER-ABLATION CONFIG ====
@@ -60,7 +62,7 @@ def build_enc_norm(
     """
     means: List[float] = []
     stds: List[float] = []
-    for c in INPUT_COLS:
+    for c in EXTRA_FEAT_COLS:
         if c == 0:
             means.append(float(coord_center[0]))
             stds.append(float(coord_half_range[0]))
@@ -166,34 +168,35 @@ class GeomLifeDataset(Dataset):
         )
         for t in tensors:
             width = t.shape[1]
-            required_cols = max(INPUT_COLS) + 1
-            if width < required_cols:
-                missing = [c for c in INPUT_COLS if c >= width]
-                raise RuntimeError(
-                    f"Tensor width {width} too small for INPUT_COLS={INPUT_COLS}; "
-                    f"missing columns {missing}. Check H5 representation matches '{EXPECTED_REPR}'."
-                )
             tcols = target_cols_for_width(width)
-            enc_feats = t[:, INPUT_COLS].contiguous()
+            geom_xyz = t[:, [0, 1]].contiguous()
+            if EXTRA_FEAT_COLS:
+                geom_feats = t[:, EXTRA_FEAT_COLS].contiguous()
+            else:
+                geom_feats = t[:, 0:0].contiguous()
             query_xy = t[:, QUERY_COLS].contiguous()
             target = t[:, list(tcols)].contiguous()
-            self.items.append((enc_feats, query_xy, target))
+            self.items.append((geom_xyz, geom_feats, query_xy, target))
 
     def __len__(self) -> int:
         return len(self.items)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        enc_feats, xy, s = self.items[idx]
+        geom_xyz, geom_feats, xy, s = self.items[idx]
         # Normalize with GLOBAL stats computed from training set
-        enc_n = (enc_feats - self.enc_mean) / self.enc_std
+        if geom_feats.numel() > 0:
+            geom_feats_n = (geom_feats - self.enc_mean) / self.enc_std
+        else:
+            geom_feats_n = geom_feats
         xyn = (xy - self.coord_center) / self.coord_half_range
         zn = (s - self.target_mean) / self.target_std
         return {
-            "enc_feats": enc_n,  # [N, len(INPUT_COLS)] normalized encoder input
+            "geom_xyz": xyn,  # [N,2] normalized (x,r) for encoder neighborhoods
+            "geom_feats": geom_feats_n,  # [N,F] normalized extra encoder features
             "points": xyn,  # [N,2] normalized (x,r) query coords
             "target": zn,  # [N, NUM_TARGETS] standardized targets
-            # Provide also unnormalized for potential analysis if needed
-            "enc_feats_raw": enc_feats,
+            "geom_xyz_raw": geom_xyz,
+            "geom_feats_raw": geom_feats,
             "points_raw": xy,
             "target_raw": s,
         }
@@ -214,10 +217,12 @@ def make_collate_fixed_points(k: int):
 
     def _collate(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         gp_b: List[torch.Tensor] = []
+        gf_b: List[torch.Tensor] = []
         qp_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         for item in batch:
-            enc = item["enc_feats"]  # [N, len(INPUT_COLS)]
+            geom_xyz = item["geom_xyz"]  # [N,2]
+            geom_feats = item["geom_feats"]  # [N,F]
             pts = item["points"]  # [N,2]
             target = item["target"]
             N = pts.shape[0]
@@ -226,11 +231,13 @@ def make_collate_fixed_points(k: int):
             else:
                 # sample with replacement to reach k
                 idx = torch.randint(0, N, (k,))
-            gp_b.append(enc[idx])
+            gp_b.append(geom_xyz[idx])
+            gf_b.append(geom_feats[idx])
             qp_b.append(pts[idx])
             t_b.append(target[idx])
         return {
             "geom_points": torch.stack(gp_b, dim=0),
+            "geom_feats": torch.stack(gf_b, dim=0),
             "query_points": torch.stack(qp_b, dim=0),
             "target": torch.stack(t_b, dim=0),
         }
@@ -253,10 +260,12 @@ class DualSamplerCollate:
 
     def __call__(self, batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         gp_b: List[torch.Tensor] = []
+        gf_b: List[torch.Tensor] = []
         qp_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         for item in batch:
-            enc = item["enc_feats"]  # [N, len(INPUT_COLS)]
+            geom_xyz = item["geom_xyz"]  # [N,2]
+            geom_feats = item["geom_feats"]  # [N,F]
             pts = item["points"]  # [N,2]
             target = item["target"]
             N = pts.shape[0]
@@ -270,11 +279,13 @@ class DualSamplerCollate:
                 idx_q = torch.randperm(N)[: self.k_q]
             else:
                 idx_q = torch.randint(0, N, (self.k_q,))
-            gp_b.append(enc[idx_enc])
+            gp_b.append(geom_xyz[idx_enc])
+            gf_b.append(geom_feats[idx_enc])
             qp_b.append(pts[idx_q])
             t_b.append(target[idx_q])
         return {
             "geom_points": torch.stack(gp_b, dim=0),
+            "geom_feats": torch.stack(gf_b, dim=0),
             "query_points": torch.stack(qp_b, dim=0),
             "target": torch.stack(t_b, dim=0),
         }
@@ -295,11 +306,13 @@ class AllNodesPadCollate:
         Ns = [item["points"].shape[0] for item in batch]
         maxN = max(Ns)
         gp_b: List[torch.Tensor] = []
+        gf_b: List[torch.Tensor] = []
         qp_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         mask_b: List[torch.Tensor] = []
         for item, N in zip(batch, Ns):
-            enc = item["enc_feats"]  # [N, len(INPUT_COLS)]
+            geom_xyz = item["geom_xyz"]  # [N,2]
+            geom_feats = item["geom_feats"]  # [N,F]
             pts = item["points"]  # [N,2]
             target = item["target"]
             idx_all = torch.arange(N)
@@ -315,12 +328,14 @@ class AllNodesPadCollate:
                 enc_idx = idx_all
                 qry_idx = idx_all
                 mask = torch.ones(maxN, dtype=torch.float32)
-            gp_b.append(enc[enc_idx])
+            gp_b.append(geom_xyz[enc_idx])
+            gf_b.append(geom_feats[enc_idx])
             qp_b.append(pts[qry_idx])
             t_b.append(target[qry_idx])
             mask_b.append(mask.unsqueeze(-1))
         return {
             "geom_points": torch.stack(gp_b, dim=0),
+            "geom_feats": torch.stack(gf_b, dim=0),
             "query_points": torch.stack(qp_b, dim=0),
             "target": torch.stack(t_b, dim=0),
             "mask": torch.stack(mask_b, dim=0),  # [B,maxN,1]
@@ -352,7 +367,7 @@ def compute_global_normalization(
     target_std = all_targets.std(dim=0, unbiased=False).clamp(min=1e-6)
 
     extra_feat_stats: Dict[int, Dict[str, float]] = {}
-    for c in INPUT_COLS:
+    for c in EXTRA_FEAT_COLS:
         if c in (0, 1):
             continue
         if c == 2:
@@ -451,6 +466,7 @@ def train(
             if "geom_points" in batch:
                 # Dual-sampling batched mode
                 gp: torch.Tensor = batch["geom_points"].to(device)  # [B,Kenc,2]
+                gf: torch.Tensor = batch["geom_feats"].to(device)  # [B,Kenc,F]
                 query_xy: torch.Tensor = batch["query_points"].to(device)  # [B,Kq,2]
                 target_z: torch.Tensor = batch["target"].to(
                     device
@@ -462,6 +478,8 @@ def train(
             else:
                 # Full-geometry single/batched mode from earlier
                 pts: torch.Tensor = batch["points"].to(device)  # [N,2] or [B,K,2]
+                geom_xyz_b: torch.Tensor = batch["geom_xyz"].to(device)
+                geom_feats_b: torch.Tensor = batch["geom_feats"].to(device)
                 target: torch.Tensor = batch["target"].to(device)  # [N,2] or [B,K,2]
                 if pts.dim() == 2:
                     # Single geometry
@@ -474,7 +492,8 @@ def train(
                         idxs = torch.randperm(N, device=device)[:q]
                         query_xy = pts[idxs]
                         target_z = target[idxs]
-                    gp = pts.unsqueeze(0)  # [1,N,2]
+                    gp = geom_xyz_b.unsqueeze(0)  # [1,N,2]
+                    gf = geom_feats_b.unsqueeze(0)
                     query_xy = query_xy.unsqueeze(0)  # [1,q,2] or [1,N,2]
                     target_z = target_z.unsqueeze(0)
                     Bmul = query_xy.shape[1]
@@ -498,11 +517,12 @@ def train(
                         query_xy = pts[bidx, idxs, :]
                         target_z = target[bidx, idxs, :]
                         Bmul = B * q
-                    gp = pts  # use same points for encoder
+                    gp = geom_xyz_b  # use same xyz for encoder
+                    gf = geom_feats_b
 
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and use_amp)):
-                pred_z = model(gp, query_xy)  # [B,Kq,2] standardized
+                pred_z = model(gp, query_xy, gf)  # [B,Kq,2] standardized
                 if pred_z.shape[-1] != target_z.shape[-1]:
                     raise RuntimeError(
                         f"Model/data mismatch: pred has {pred_z.shape[-1]} outputs but target has {target_z.shape[-1]}"
@@ -545,7 +565,8 @@ def train(
 
         with torch.no_grad():
             for batch in val_loader:
-                enc: torch.Tensor = batch["enc_feats"].to(device)  # [N, len(INPUT_COLS)]
+                geom_xyz: torch.Tensor = batch["geom_xyz"].to(device)  # [N,2]
+                geom_feats: torch.Tensor = batch["geom_feats"].to(device)  # [N,F]
                 pts: torch.Tensor = batch["points"].to(device)  # [N,2]
                 target: torch.Tensor = batch["target"].to(
                     device
@@ -554,7 +575,7 @@ def train(
                 with torch.cuda.amp.autocast(
                     enabled=(device.type == "cuda" and use_amp)
                 ):
-                    pred = model(enc.unsqueeze(0), pts.unsqueeze(0)).squeeze(
+                    pred = model(geom_xyz.unsqueeze(0), pts.unsqueeze(0), geom_feats.unsqueeze(0)).squeeze(
                         0
                     )  # [N, NUM_TARGETS] standardized
                 if pred.shape[-1] != target.shape[-1]:
@@ -710,6 +731,9 @@ def main(preset_name: str = "S0", batch=8) -> None:
     print(f"Loading data from: {h5py_path}")
     PS_list_whole = load_h5_pointsets(h5py_path)
     print(f"Loaded {len(PS_list_whole)} datasets from the HDF5 file.")
+    width0 = int(PS_list_whole[0].shape[1])
+    EXTRA_FEAT_COLS = list(range(2, width0 - 2))
+    print(f"[patch_pointnet_features] EXTRA_FEAT_COLS={EXTRA_FEAT_COLS} (n={len(EXTRA_FEAT_COLS)})")
 
     # Load external presets JSON to allow expanding model zoo without editing this script
     presets_path = Path(project_dir, "model_presets.json")
@@ -770,7 +794,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         "gf_hidden": gf_hidden,
         "head_hidden": head_hidden,
         "out_dim": NUM_TARGETS,
-        "input_cols": INPUT_COLS,
+        "extra_feat_cols": EXTRA_FEAT_COLS,
         "target_names": TARGET_NAMES,
         "posenc": posenc,
         "head_posenc": head_posenc,
@@ -929,7 +953,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         mlp_hidden=head_hidden,
         out_dim=NUM_TARGETS,
         encoder_cfg=encoder_cfg,
-        in_channels=len(INPUT_COLS),
+        in_channels=len(EXTRA_FEAT_COLS),
     )
     param_count = sum(p.numel() for p in model.parameters())
     print(f"Model initialized with {param_count:,} parameters.")
