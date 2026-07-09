@@ -698,6 +698,7 @@ def train(
 def main(preset_name: str = "S0", batch=8) -> None:
     # preset_name = "S0"
     # batch = 8
+    global EXTRA_FEAT_COLS
     print(
         f"Starting training script with preset '{preset_name}' and batch size {batch}"
     )

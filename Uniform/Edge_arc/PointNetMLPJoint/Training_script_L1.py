@@ -29,10 +29,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ==== PER-ABLATION CONFIG ====
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
-INPUT_COLS: List[int] = [0, 1, 3]
 H5_FILENAME: str = "disc_dataset_edge_deriv_uniform.h5"
 EXPECTED_REPR: str = "edge"
 # ==== END PER-ABLATION CONFIG ====
+
+EXTRA_FEAT_COLS: List[int] = []
 
 NUM_TARGETS: int = len(TARGET_NAMES)
 QUERY_COLS: List[int] = [0, 1]  # head query always uses (x, r)
@@ -862,6 +863,7 @@ def train(
 def main(preset_name: str = "S0", batch=8) -> None:
     # preset_name = "S0"
     # batch = 8
+    global EXTRA_FEAT_COLS
     print(
         f"Starting training script with preset '{preset_name}' and batch size {batch}"
     )
