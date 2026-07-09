@@ -3,15 +3,16 @@
 fix_ablations.py
 Fixes two bugs in the Disc Lifing paper training scripts:
 
-1. Full-variant scripts have EXPECTED_REPR = "mesh" but the H5 files
-   (disc_dataset_full_zonal.h5 / disc_dataset_full_uniform.h5) store
-   representation = "full". The H5 filenames are correct; only EXPECTED_REPR
-   needs changing to "full".
+1. Full-variant scripts have EXPECTED_REPR = "mesh" but the H5 files store
+   representation = "full". Fix: change EXPECTED_REPR to "full".
    Affected: every Training_script*.py under */Full/*/
 
-2. PointNetMLPJoint scripts hardcode in_channels=34, which crashes on
-   edge-arc (51 feats), edge-arc-feat (119 feats), edge-zoneID, etc.
-   Fix: replace the hardcoded value with a runtime lookup from the H5 data.
+2. PointNetMLPJoint scripts hardcode INPUT_COLS = [0, 1] (only x, r).
+   This means the model always gets in_channels=2, ignoring all extra
+   features in the H5 (arc_length, tangent_x, tangent_r, curvature, etc.).
+   Fix: replace the hardcoded INPUT_COLS list with a dynamic version that
+   reads the actual number of feature columns from the first H5 sample at
+   runtime, BEFORE the model is constructed.
    Affected: every Training_script*.py under */PointNetMLPJoint/
 
 Usage:
@@ -24,9 +25,9 @@ import os
 import re
 import sys
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Fix 1: EXPECTED_REPR "mesh" -> "full" in Full-variant scripts
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 EXPECTED_REPR_PATTERN = re.compile(
     r'(EXPECTED_REPR\s*:\s*str\s*=\s*)["\']mesh["\']'
@@ -35,7 +36,6 @@ EXPECTED_REPR_PATTERN = re.compile(
 
 def fix_expected_repr(content, filepath, dry_run):
     """Change EXPECTED_REPR = "mesh" -> "full" only in Full-variant scripts."""
-    # Only touch scripts that live under a 'Full' ablation folder
     if not re.search(r'[\\/]Full[\\/]', filepath):
         return content, False
     if not EXPECTED_REPR_PATTERN.search(content):
@@ -46,73 +46,96 @@ def fix_expected_repr(content, filepath, dry_run):
     return new_content, True
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Fix 2: dynamic in_channels for PointNetMLPJoint scripts
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Fix 2: Dynamic INPUT_COLS for PointNetMLPJoint scripts
+# ─────────────────────────────────────────────────────────────────────────────
 
-IN_CHANNELS_PATTERNS = [
-    (re.compile(r'\bin_channels\s*=\s*34\b'),        'in_channels=in_channels_auto'),
-    (re.compile(r'"in_channels"\s*:\s*34\b'),         '"in_channels": in_channels_auto'),
-    (re.compile(r"'in_channels'\s*:\s*34\b"),         "'in_channels': in_channels_auto"),
-]
+# Matches the hardcoded per-ablation config block line:
+#   INPUT_COLS: List[int] = [0, 1]
+# The list may contain 2+ ints but we only want to replace the *config-block*
+# declaration (not other references). We anchor on the comment block that
+# surrounds it in every script.
+INPUT_COLS_DECL_PATTERN = re.compile(
+    r'^(INPUT_COLS\s*:\s*List\[int\]\s*=\s*)\[.*?\]',
+    re.MULTILINE,
+)
 
-INJECT_MARKER = "in_channels_auto"
+# Sentinel so we don't inject twice
+INJECT_SENTINEL = '# [fix_ablations] INPUT_COLS dynamic'
 
-INJECT_CODE = '''
-# --- AUTO-INJECTED by fix_ablations.py: derive in_channels from dataset ---
-with __import__('h5py').File(h5_path, 'r') as _hf:
-    _sample_key = list(_hf.keys())[0]
-    _feats = _hf[_sample_key]['edge_features'][:]
-    in_channels_auto = int(_feats.shape[-1])
-print(f"[auto] in_channels detected from data: {in_channels_auto}")
-# --- END AUTO-INJECT ---
+# Code block injected just before the model is constructed (before
+# PointNetMLPJoint(...) call). It reads the width of the first sample,
+# subtracts the 2 target columns appended by the loader, and builds
+# INPUT_COLS = [0, 1, ..., width-3] covering all feature columns.
+INJECT_CODE_TEMPLATE = '''
+{sentinel}
+# Derive INPUT_COLS dynamically from the first sample in the H5 file so that
+# all feature columns (x, r, zone_id, arc_length, tangent_x, …) are used.
+# The loader always appends 2 target columns (stress, log_life) at the end,
+# so feature width = sample_width - 2.
+_first_sample_width = int(PS_list_whole[0].shape[1])
+_n_feature_cols = _first_sample_width - 2  # subtract stress + log_life
+INPUT_COLS = list(range(_n_feature_cols))
+print(f"[fix_ablations] INPUT_COLS set dynamically: {{INPUT_COLS}} ({{len(INPUT_COLS)}} channels)")
 '''
 
-INJECT_AFTER_PATTERN = re.compile(r'Loaded\s+\d+\s+datasets', re.IGNORECASE)
+# We inject AFTER the data-load block, identified by the line that prints how
+# many datasets were loaded. This is reliably present in all scripts.
+INJECT_AFTER_PATTERN = re.compile(
+    r'print\s*\(.*?[Ll]oaded.*?dataset', re.IGNORECASE
+)
 
 
-def needs_in_channels_fix(content):
-    return any(pat.search(content) for pat, _ in IN_CHANNELS_PATTERNS)
+def needs_input_cols_fix(content, filepath):
+    """Only touch PointNetMLPJoint scripts that still have hardcoded INPUT_COLS."""
+    if 'PointNetMLPJoint' not in filepath:
+        return False
+    if INJECT_SENTINEL in content:
+        return False  # already patched
+    return bool(INPUT_COLS_DECL_PATTERN.search(content))
 
 
-def apply_in_channels_fix(content, filepath, dry_run):
-    changed = False
-    new_content = content
-    for pat, replacement in IN_CHANNELS_PATTERNS:
-        if pat.search(new_content):
-            new_content = pat.sub(replacement, new_content)
-            changed = True
-    if not changed:
+def apply_input_cols_fix(content, filepath, dry_run):
+    # Step A: replace the hardcoded declaration with a placeholder comment so
+    # the name exists at module level (required for the normalization code that
+    # references INPUT_COLS before main() runs).
+    new_content = INPUT_COLS_DECL_PATTERN.sub(
+        r'\1[0, 1]  # overridden dynamically below inside main()',
+        content,
+        count=1,
+    )
+
+    # Step B: inject the dynamic derivation block inside main(), right after
+    # the line that prints "Loaded N datasets".
+    inject_code = INJECT_CODE_TEMPLATE.format(sentinel=INJECT_SENTINEL)
+    lines = new_content.splitlines(keepends=True)
+    insert_at = None
+    for i, line in enumerate(lines):
+        if INJECT_AFTER_PATTERN.search(line):
+            insert_at = i + 1
+            break
+
+    if insert_at is None:
+        # Fallback: inject just before PointNetMLPJoint model construction
+        for i, line in enumerate(lines):
+            if 'PointNetMLPJoint(' in line:
+                insert_at = i
+                break
+
+    if insert_at is not None:
+        lines.insert(insert_at, inject_code)
+        new_content = ''.join(lines)
+        print(f"{'[DRY-RUN] ' if dry_run else ''}{filepath}")
+        print(f'  [INPUT_COLS] will be set dynamically from H5 data at runtime')
+        return new_content, True
+    else:
+        print(f'  WARNING: could not find injection point in {filepath}. Skipping INPUT_COLS fix.')
         return content, False
 
-    # Inject detection block once, after "Loaded N datasets" print
-    if INJECT_MARKER in new_content and INJECT_CODE.strip() not in new_content:
-        lines = new_content.splitlines(keepends=True)
-        insert_at = None
-        for i, line in enumerate(lines):
-            if INJECT_AFTER_PATTERN.search(line):
-                insert_at = i + 1
-                break
-        if insert_at is None:
-            for i, line in enumerate(lines):
-                if 'Model initialized' in line or re.search(r'\bmodel\s*=', line):
-                    insert_at = i
-                    break
-        if insert_at is not None:
-            lines.insert(insert_at, INJECT_CODE)
-            new_content = ''.join(lines)
-        else:
-            print(f'  WARNING: could not find injection point in {filepath}.'
-                  ' Add in_channels_auto detection manually before model init.')
 
-    print(f"{'[DRY-RUN] ' if dry_run else ''}{filepath}")
-    print('  [IN-CHANNELS] replaced hardcoded 34 with in_channels_auto')
-    return new_content, True
-
-
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # File processing
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def find_training_scripts(root):
     pattern = os.path.join(root, '**', 'Training_script*.py')
@@ -128,8 +151,8 @@ def process_file(filepath, dry_run):
     content, changed = fix_expected_repr(content, filepath, dry_run)
     any_change = any_change or changed
 
-    if needs_in_channels_fix(content):
-        content, changed = apply_in_channels_fix(content, filepath, dry_run)
+    if needs_input_cols_fix(content, filepath):
+        content, changed = apply_input_cols_fix(content, filepath, dry_run)
         any_change = any_change or changed
 
     if any_change and not dry_run:
@@ -139,9 +162,9 @@ def process_file(filepath, dry_run):
     return any_change
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
