@@ -58,14 +58,14 @@ NOMINAL_GEOMETRY_MM: Dict[str, float] = {
 MIN_OFFSET_MM = {
     "bore_radius_inner":       -4.0,
     "bore_height":             -2.5,
-    "bore_thickness":          -6.0,
+    "bore_thickness":          -8.0,   # widened from -6.0 — let bore get much thinner
     "lower_transition_height": -2.0,
     "web_height":              -8.0,
-    "web_thickness":           -2.0,
+    "web_thickness":           -4.0,   # widened from -2.0 — let web get much thinner (more critical)
     "upper_transition_height": -2.0,
     "rim_height":              -3.5,
-    "rim_thickness":           -4.0,
-    "lower_fillet_radius":     -1.2,
+    "rim_thickness":           -6.0,   # widened from -4.0 — let rim compete too
+    "lower_fillet_radius":     -1.2,   # reset to original symmetric range
     "upper_fillet_radius":     -1.2,
 }
 
@@ -75,7 +75,7 @@ MAX_OFFSET_MM = {
     "bore_thickness":          +6.0,
     "lower_transition_height": +2.0,
     "web_height":              +8.0,
-    "web_thickness":           +2.0,
+    "web_thickness":           +6.0,   # widened from +2.0 — let web get much thicker (less critical sometimes)
     "upper_transition_height": +2.0,
     "rim_height":              +3.5,
     "rim_thickness":           +4.0,
