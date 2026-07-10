@@ -714,6 +714,8 @@ def train(
                 "target_mean": target_mean.cpu(),
                 "target_std": target_std.cpu(),
                 "extra_feat_stats": extra_feat_stats,
+                "extra_feat_cols": EXTRA_FEAT_COLS,  # [patch_checkpoint_cols] ckpt patched
+                "head_feat_cols": HEAD_FEAT_COLS,
                 "model_name": model_name,
                 "history": history,
                 "config": {
@@ -889,6 +891,10 @@ def main(preset_name: str = "S0", batch=8) -> None:
         # Backward compatibility: recompute extra_feat_stats if absent in old checkpoints
         if resume_checkpoint.get("extra_feat_stats") is not None:
             extra_feat_stats = resume_checkpoint["extra_feat_stats"]
+            if resume_checkpoint.get("extra_feat_cols") is not None:  # [patch_checkpoint_cols] resume patched
+                EXTRA_FEAT_COLS = resume_checkpoint["extra_feat_cols"]
+            if resume_checkpoint.get("head_feat_cols") is not None:
+                HEAD_FEAT_COLS = resume_checkpoint["head_feat_cols"]
 
     print(
         "Using per-target z-score normalization so Stress (~200-1200) and LogLife (~3-7) are balanced during training."

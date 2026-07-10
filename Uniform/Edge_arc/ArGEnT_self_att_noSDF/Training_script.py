@@ -636,6 +636,7 @@ def train(
                     "target_mean": target_mean.cpu(),
                     "target_std": target_std.cpu(),
                     "extra_feat_stats": extra_feat_stats,
+                    "extra_feat_cols": EXTRA_FEAT_COLS,  # [patch_checkpoint_cols] ckpt patched
                     "epochs_since_improve": epochs_since_improve,
                     "train_history": train_history,
                     "config": {
