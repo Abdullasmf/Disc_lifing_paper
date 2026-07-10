@@ -897,7 +897,6 @@ def train(
 def main(preset_name: str = "S0", batch=8) -> None:
     global EXTRA_FEAT_COLS
     global HEAD_FEAT_COLS
-    global HEAD_FEAT_COLS
     # preset_name = "S0"
     # batch = 8
     print(
