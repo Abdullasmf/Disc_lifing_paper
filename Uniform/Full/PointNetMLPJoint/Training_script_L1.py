@@ -862,7 +862,6 @@ def train(
 
 def main(preset_name: str = "S0", batch=8) -> None:
     global EXTRA_FEAT_COLS
-    global EXTRA_FEAT_COLS  # [patch_extra_feat_cols_global] global declaration inserted
     # preset_name = "S0"
     # batch = 8
     print(

@@ -699,7 +699,6 @@ def main(preset_name: str = "S0", batch=8) -> None:
     global EXTRA_FEAT_COLS  # [patch_extra_feat_cols_global] global declaration inserted
     # preset_name = "S0"
     # batch = 8
-    global EXTRA_FEAT_COLS
     print(
         f"Starting training script with preset '{preset_name}' and batch size {batch}"
     )
