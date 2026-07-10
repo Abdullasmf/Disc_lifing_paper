@@ -399,6 +399,7 @@ class PointNetMLPJoint(nn.Module):
         out_dim: int = 1,
         encoder_cfg: Optional[Dict[str, Any]] = None,
         in_channels: int = 0,
+        head_feat_dim: int = 0,
     ):
         super().__init__()
         # Encoder (cfg latent_dim overrides arg if provided)
@@ -410,6 +411,7 @@ class PointNetMLPJoint(nn.Module):
             mlp_hidden = [256, 256, 128]
         self.head_hidden = list(mlp_hidden)
         self.out_dim = int(out_dim)
+        self.head_feat_dim = int(head_feat_dim)
         # Optional Fourier features for query points in head
         head_posenc_cfg = None
         if encoder_cfg is not None:
@@ -432,7 +434,7 @@ class PointNetMLPJoint(nn.Module):
             head_norm = str(encoder_cfg.get("head_norm", "batch"))
             head_dropout = float(encoder_cfg.get("head_dropout", 0.0))
 
-        in_dim = eff_latent + q_in_dim
+        in_dim = eff_latent + q_in_dim + self.head_feat_dim
         self.head = MLP(
             in_dim,
             self.head_hidden,
@@ -456,6 +458,7 @@ class PointNetMLPJoint(nn.Module):
             "encoder_cfg": enc_cfg_persist,
             "head_hidden": list(self.head_hidden),
             "out_dim": self.out_dim,
+            "head_feat_dim": self.head_feat_dim,
         }
 
     def get_arch(self) -> Dict[str, Any]:
@@ -468,6 +471,7 @@ class PointNetMLPJoint(nn.Module):
         geom_xyz: torch.Tensor,
         query_points: torch.Tensor,
         geom_feats: Optional[torch.Tensor] = None,
+        head_feats: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         z = self.encoder(geom_xyz, geom_feats)  # [B,L]
         B, Q, _ = query_points.shape
@@ -477,7 +481,10 @@ class PointNetMLPJoint(nn.Module):
             else query_points
         )
         z_exp = z.unsqueeze(1).expand(-1, Q, -1)
-        x = torch.cat([z_exp, q_feat], dim=-1)
+        if head_feats is not None and head_feats.numel() > 0:
+            x = torch.cat([z_exp, q_feat, head_feats], dim=-1)
+        else:
+            x = torch.cat([z_exp, q_feat], dim=-1)
         x = x.reshape(B * Q, -1)
         y = self.head(x)
         y = y.view(B, Q, self.out_dim)
@@ -497,6 +504,7 @@ def build_model_from_arch(arch: Dict[str, Any]) -> PointNetMLPJoint:
     encoder_cfg = arch.get("encoder_cfg", None)
     head_hidden = arch.get("head_hidden", [256, 256, 128])
     out_dim = int(arch.get("out_dim", 1))
+    head_feat_dim = int(arch.get("head_feat_dim", 0))
     latent_dim = int(encoder_cfg.get("latent_dim", 128)) if encoder_cfg else 128
     in_channels = int(encoder_cfg.get("in_channels", 2)) if encoder_cfg else 2
     return PointNetMLPJoint(
@@ -505,4 +513,5 @@ def build_model_from_arch(arch: Dict[str, Any]) -> PointNetMLPJoint:
         out_dim=out_dim,
         encoder_cfg=encoder_cfg,
         in_channels=in_channels,
+        head_feat_dim=head_feat_dim,
     )

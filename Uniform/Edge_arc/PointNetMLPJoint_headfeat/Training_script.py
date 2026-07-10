@@ -34,6 +34,7 @@ EXPECTED_REPR: str = "edge"
 # ==== END PER-ABLATION CONFIG ====
 
 EXTRA_FEAT_COLS: List[int] = []
+HEAD_FEAT_COLS: List[int] = []
 
 NUM_TARGETS: int = len(TARGET_NAMES)
 QUERY_COLS: List[int] = [0, 1]  # head query always uses (x, r)
@@ -157,7 +158,7 @@ class GeomLifeDataset(Dataset):
         extra_feat_stats: Dict[int, Dict[str, float]],
     ) -> None:
         super().__init__()
-        self.items: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+        self.items: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = []
         self.coord_center = coord_center
         self.coord_half_range = torch.clamp(coord_half_range, min=1e-8)
         self.target_mean = target_mean
@@ -175,28 +176,38 @@ class GeomLifeDataset(Dataset):
             else:
                 geom_feats = t[:, 0:0].contiguous()
             query_xy = t[:, QUERY_COLS].contiguous()
+            if HEAD_FEAT_COLS:
+                head_feats = t[:, HEAD_FEAT_COLS].contiguous()
+            else:
+                head_feats = t[:, 0:0].contiguous()
             target = t[:, list(tcols)].contiguous()
-            self.items.append((geom_xyz, geom_feats, query_xy, target))
+            self.items.append((geom_xyz, geom_feats, head_feats, query_xy, target))
 
     def __len__(self) -> int:
         return len(self.items)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        geom_xyz, geom_feats, xy, s = self.items[idx]
+        geom_xyz, geom_feats, head_feats, xy, s = self.items[idx]
         # Normalize with GLOBAL stats computed from training set
         if geom_feats.numel() > 0:
             geom_feats_n = (geom_feats - self.enc_mean) / self.enc_std
         else:
             geom_feats_n = geom_feats
+        if head_feats.numel() > 0:
+            head_feats_n = (head_feats - self.enc_mean) / self.enc_std
+        else:
+            head_feats_n = head_feats
         xyn = (xy - self.coord_center) / self.coord_half_range
         zn = (s - self.target_mean) / self.target_std
         return {
             "geom_xyz": xyn,  # [N,2] normalized (x,r) for encoder neighborhoods
             "geom_feats": geom_feats_n,  # [N,F] normalized extra encoder features
             "points": xyn,  # [N,2] normalized (x,r) query coords
+            "head_feats": head_feats_n,  # [N,Fh] normalized extra head features
             "target": zn,  # [N, NUM_TARGETS] standardized targets
             "geom_xyz_raw": geom_xyz,
             "geom_feats_raw": geom_feats,
+            "head_feats_raw": head_feats,
             "points_raw": xy,
             "target_raw": s,
         }
@@ -219,11 +230,13 @@ def make_collate_fixed_points(k: int):
         gp_b: List[torch.Tensor] = []
         gf_b: List[torch.Tensor] = []
         qp_b: List[torch.Tensor] = []
+        hf_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         for item in batch:
             geom_xyz = item["geom_xyz"]  # [N,2]
             geom_feats = item["geom_feats"]  # [N,F]
             pts = item["points"]  # [N,2]
+            head_feats = item["head_feats"]  # [N,Fh]
             target = item["target"]
             N = pts.shape[0]
             if N >= k:
@@ -234,11 +247,13 @@ def make_collate_fixed_points(k: int):
             gp_b.append(geom_xyz[idx])
             gf_b.append(geom_feats[idx])
             qp_b.append(pts[idx])
+            hf_b.append(head_feats[idx])
             t_b.append(target[idx])
         return {
             "geom_points": torch.stack(gp_b, dim=0),
             "geom_feats": torch.stack(gf_b, dim=0),
             "query_points": torch.stack(qp_b, dim=0),
+            "head_feats": torch.stack(hf_b, dim=0),
             "target": torch.stack(t_b, dim=0),
         }
 
@@ -262,11 +277,13 @@ class DualSamplerCollate:
         gp_b: List[torch.Tensor] = []
         gf_b: List[torch.Tensor] = []
         qp_b: List[torch.Tensor] = []
+        hf_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         for item in batch:
             geom_xyz = item["geom_xyz"]  # [N,2]
             geom_feats = item["geom_feats"]  # [N,F]
             pts = item["points"]  # [N,2]
+            head_feats = item["head_feats"]  # [N,Fh]
             target = item["target"]
             N = pts.shape[0]
             # Encoder samples
@@ -282,11 +299,13 @@ class DualSamplerCollate:
             gp_b.append(geom_xyz[idx_enc])
             gf_b.append(geom_feats[idx_enc])
             qp_b.append(pts[idx_q])
+            hf_b.append(head_feats[idx_q])
             t_b.append(target[idx_q])
         return {
             "geom_points": torch.stack(gp_b, dim=0),
             "geom_feats": torch.stack(gf_b, dim=0),
             "query_points": torch.stack(qp_b, dim=0),
+            "head_feats": torch.stack(hf_b, dim=0),
             "target": torch.stack(t_b, dim=0),
         }
 
@@ -308,12 +327,14 @@ class AllNodesPadCollate:
         gp_b: List[torch.Tensor] = []
         gf_b: List[torch.Tensor] = []
         qp_b: List[torch.Tensor] = []
+        hf_b: List[torch.Tensor] = []
         t_b: List[torch.Tensor] = []
         mask_b: List[torch.Tensor] = []
         for item, N in zip(batch, Ns):
             geom_xyz = item["geom_xyz"]  # [N,2]
             geom_feats = item["geom_feats"]  # [N,F]
             pts = item["points"]  # [N,2]
+            head_feats = item["head_feats"]  # [N,Fh]
             target = item["target"]
             idx_all = torch.arange(N)
             if N < maxN:
@@ -331,12 +352,14 @@ class AllNodesPadCollate:
             gp_b.append(geom_xyz[enc_idx])
             gf_b.append(geom_feats[enc_idx])
             qp_b.append(pts[qry_idx])
+            hf_b.append(head_feats[qry_idx])
             t_b.append(target[qry_idx])
             mask_b.append(mask.unsqueeze(-1))
         return {
             "geom_points": torch.stack(gp_b, dim=0),
             "geom_feats": torch.stack(gf_b, dim=0),
             "query_points": torch.stack(qp_b, dim=0),
+            "head_feats": torch.stack(hf_b, dim=0),
             "target": torch.stack(t_b, dim=0),
             "mask": torch.stack(mask_b, dim=0),  # [B,maxN,1]
         }
@@ -468,6 +491,7 @@ def train(
                 gp: torch.Tensor = batch["geom_points"].to(device)  # [B,Kenc,2]
                 gf: torch.Tensor = batch["geom_feats"].to(device)  # [B,Kenc,F]
                 query_xy: torch.Tensor = batch["query_points"].to(device)  # [B,Kq,2]
+                hf: torch.Tensor = batch["head_feats"].to(device)  # [B,Kq,Fh]
                 target_z: torch.Tensor = batch["target"].to(
                     device
                 )  # [B,Kq,2] standardized (Stress, LogLife)
@@ -480,21 +504,25 @@ def train(
                 pts: torch.Tensor = batch["points"].to(device)  # [N,2] or [B,K,2]
                 geom_xyz_b: torch.Tensor = batch["geom_xyz"].to(device)
                 geom_feats_b: torch.Tensor = batch["geom_feats"].to(device)
+                head_feats_b: torch.Tensor = batch["head_feats"].to(device)
                 target: torch.Tensor = batch["target"].to(device)  # [N,2] or [B,K,2]
                 if pts.dim() == 2:
                     # Single geometry
                     N = pts.shape[0]
                     if max_points_per_geom is None:
                         query_xy = pts
+                        head_feats_q = head_feats_b
                         target_z = target
                     else:
                         q = min(N, max_points_per_geom)
                         idxs = torch.randperm(N, device=device)[:q]
                         query_xy = pts[idxs]
+                        head_feats_q = head_feats_b[idxs]
                         target_z = target[idxs]
                     gp = geom_xyz_b.unsqueeze(0)  # [1,N,2]
                     gf = geom_feats_b.unsqueeze(0)
                     query_xy = query_xy.unsqueeze(0)  # [1,q,2] or [1,N,2]
+                    hf = head_feats_q.unsqueeze(0)
                     target_z = target_z.unsqueeze(0)
                     Bmul = query_xy.shape[1]
                 else:
@@ -502,6 +530,7 @@ def train(
                     B, K, _ = pts.shape
                     if max_points_per_geom is None or max_points_per_geom >= K:
                         query_xy = pts
+                        hf = head_feats_b
                         target_z = target
                         Bmul = B * K
                     else:
@@ -515,6 +544,7 @@ def train(
                             torch.arange(B, device=device).unsqueeze(-1).expand(-1, q)
                         )
                         query_xy = pts[bidx, idxs, :]
+                        hf = head_feats_b[bidx, idxs, :]
                         target_z = target[bidx, idxs, :]
                         Bmul = B * q
                     gp = geom_xyz_b  # use same xyz for encoder
@@ -522,7 +552,7 @@ def train(
 
             optimizer.zero_grad(set_to_none=True)
             with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and use_amp)):
-                pred_z = model(gp, query_xy, gf)  # [B,Kq,2] standardized
+                pred_z = model(gp, query_xy, gf, hf)  # [B,Kq,2] standardized
                 if pred_z.shape[-1] != target_z.shape[-1]:
                     raise RuntimeError(
                         f"Model/data mismatch: pred has {pred_z.shape[-1]} outputs but target has {target_z.shape[-1]}"
@@ -568,6 +598,7 @@ def train(
                 geom_xyz: torch.Tensor = batch["geom_xyz"].to(device)  # [N,2]
                 geom_feats: torch.Tensor = batch["geom_feats"].to(device)  # [N,F]
                 pts: torch.Tensor = batch["points"].to(device)  # [N,2]
+                head_feats: torch.Tensor = batch["head_feats"].to(device)  # [N,Fh]
                 target: torch.Tensor = batch["target"].to(
                     device
                 )  # [N, NUM_TARGETS] standardized
@@ -575,9 +606,12 @@ def train(
                 with torch.cuda.amp.autocast(
                     enabled=(device.type == "cuda" and use_amp)
                 ):
-                    pred = model(geom_xyz.unsqueeze(0), pts.unsqueeze(0), geom_feats.unsqueeze(0)).squeeze(
-                        0
-                    )  # [N, NUM_TARGETS] standardized
+                    pred = model(
+                        geom_xyz.unsqueeze(0),
+                        pts.unsqueeze(0),
+                        geom_feats.unsqueeze(0),
+                        head_feats.unsqueeze(0),
+                    ).squeeze(0)  # [N, NUM_TARGETS] standardized
                 if pred.shape[-1] != target.shape[-1]:
                     raise RuntimeError(
                         f"Model/data mismatch in validation: pred has {pred.shape[-1]} outputs but target has {target.shape[-1]}"
@@ -696,10 +730,11 @@ def train(
 
 
 def main(preset_name: str = "S0", batch=8) -> None:
-    global EXTRA_FEAT_COLS  # [patch_extra_feat_cols_global] global declaration inserted
+    global EXTRA_FEAT_COLS
+    global HEAD_FEAT_COLS
+    global HEAD_FEAT_COLS
     # preset_name = "S0"
     # batch = 8
-    global EXTRA_FEAT_COLS
     print(
         f"Starting training script with preset '{preset_name}' and batch size {batch}"
     )
@@ -735,7 +770,9 @@ def main(preset_name: str = "S0", batch=8) -> None:
     print(f"Loaded {len(PS_list_whole)} datasets from the HDF5 file.")
     width0 = int(PS_list_whole[0].shape[1])
     EXTRA_FEAT_COLS = list(range(2, width0 - 2))
+    HEAD_FEAT_COLS = list(range(2, width0 - 2))
     print(f"[patch_pointnet_features] EXTRA_FEAT_COLS={EXTRA_FEAT_COLS} (n={len(EXTRA_FEAT_COLS)})")
+    print(f"[patch_pointnet_features] HEAD_FEAT_COLS={HEAD_FEAT_COLS} (n={len(HEAD_FEAT_COLS)})")
 
     # Load external presets JSON to allow expanding model zoo without editing this script
     presets_path = Path(project_dir, "model_presets.json")
@@ -797,6 +834,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         "head_hidden": head_hidden,
         "out_dim": NUM_TARGETS,
         "extra_feat_cols": EXTRA_FEAT_COLS,
+        "head_feat_cols": HEAD_FEAT_COLS,
         "target_names": TARGET_NAMES,
         "posenc": posenc,
         "head_posenc": head_posenc,
@@ -956,6 +994,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         out_dim=NUM_TARGETS,
         encoder_cfg=encoder_cfg,
         in_channels=len(EXTRA_FEAT_COLS),
+        head_feat_dim=len(HEAD_FEAT_COLS),
     )
     param_count = sum(p.numel() for p in model.parameters())
     print(f"Model initialized with {param_count:,} parameters.")
