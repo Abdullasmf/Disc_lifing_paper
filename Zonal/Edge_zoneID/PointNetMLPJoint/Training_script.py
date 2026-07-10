@@ -736,11 +736,6 @@ def main(preset_name: str = "S0", batch=8) -> None:
     EXTRA_FEAT_COLS = list(range(2, width0 - 2))
     print(f"[patch_pointnet_features] EXTRA_FEAT_COLS={EXTRA_FEAT_COLS} (n={len(EXTRA_FEAT_COLS)})")
 
-    _first_sample_width = int(PS_list_whole[0].shape[1])
-    _n_feature_cols = _first_sample_width - 2  # subtract stress + log_life
-    INPUT_COLS = list(range(_n_feature_cols))
-    print(f"[fix_ablations] INPUT_COLS set dynamically: {INPUT_COLS} ({len(INPUT_COLS)} channels)")
-
     # Load external presets JSON to allow expanding model zoo without editing this script
     presets_path = Path(project_dir, "model_presets.json")
     if not presets_path.exists():
