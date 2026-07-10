@@ -840,6 +840,7 @@ def train(
                 "target_mean": target_mean.cpu(),
                 "target_std": target_std.cpu(),
                 "extra_feat_stats": extra_feat_stats,
+                "extra_feat_cols": EXTRA_FEAT_COLS,  # [patch_checkpoint_cols] ckpt patched
                 "model_name": model_name,
                 "history": history,
                 "config": {
@@ -1025,6 +1026,8 @@ def main(preset_name: str = "S0", batch=8) -> None:
         # Backward compatibility: recompute extra_feat_stats if absent in old checkpoints
         if resume_checkpoint.get("extra_feat_stats") is not None:
             extra_feat_stats = resume_checkpoint["extra_feat_stats"]
+            if resume_checkpoint.get("extra_feat_cols") is not None:  # [patch_checkpoint_cols] resume patched
+                EXTRA_FEAT_COLS = resume_checkpoint["extra_feat_cols"]
 
     print(
         f"Coord center={coord_center.numpy()}, half_range={coord_half_range.numpy()} | target_mean={target_mean.numpy()}, target_std={target_std.numpy()}"
