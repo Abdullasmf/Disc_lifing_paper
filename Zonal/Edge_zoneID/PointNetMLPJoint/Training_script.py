@@ -29,7 +29,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ==== PER-ABLATION CONFIG ====
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
-INPUT_COLS: List[int] = [0, 1]  # legacy, kept for compatibility
 EXTRA_FEAT_COLS: List[int] = []  # overridden dynamically below inside main()
 H5_FILENAME: str = "disc_dataset_edge_deriv_zonal.h5"
 EXPECTED_REPR: str = "edge"
@@ -56,7 +55,7 @@ def build_enc_norm(
     coord_half_range: torch.Tensor,
     extra_feat_stats: Dict[int, Dict[str, float]],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Build per-INPUT_COL normalization (mean, std) vectors aligned to INPUT_COLS.
+    """Build per-EXTRA_FEAT_COL normalization (mean, std) vectors aligned to EXTRA_FEAT_COLS.
 
     Cols 0/1 use coord min-max (center, half_range); other cols use z-score stats.
     """
@@ -696,6 +695,7 @@ def train(
 
 
 def main(preset_name: str = "S0", batch=8) -> None:
+    global EXTRA_FEAT_COLS
     global EXTRA_FEAT_COLS  # [patch_extra_feat_cols_global] global declaration inserted
     # preset_name = "S0"
     # batch = 8
@@ -736,11 +736,6 @@ def main(preset_name: str = "S0", batch=8) -> None:
     EXTRA_FEAT_COLS = list(range(2, width0 - 2))
     print(f"[patch_pointnet_features] EXTRA_FEAT_COLS={EXTRA_FEAT_COLS} (n={len(EXTRA_FEAT_COLS)})")
 
-    # [fix_ablations] INPUT_COLS dynamic
-    # Derive INPUT_COLS dynamically from the first sample in the H5 file so that
-    # all feature columns (x, r, zone_id, arc_length, tangent_x, …) are used.
-    # The loader always appends 2 target columns (stress, log_life) at the end,
-    # so feature width = sample_width - 2.
     _first_sample_width = int(PS_list_whole[0].shape[1])
     _n_feature_cols = _first_sample_width - 2  # subtract stress + log_life
     INPUT_COLS = list(range(_n_feature_cols))

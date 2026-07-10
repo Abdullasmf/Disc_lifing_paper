@@ -56,7 +56,7 @@ def build_enc_norm(
     coord_half_range: torch.Tensor,
     extra_feat_stats: Dict[int, Dict[str, float]],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Build per-INPUT_COL normalization (mean, std) vectors aligned to INPUT_COLS.
+    """Build per-EXTRA_FEAT_COL normalization (mean, std) vectors aligned to EXTRA_FEAT_COLS.
 
     Cols 0/1 use coord min-max (center, half_range); other cols use z-score stats.
     """

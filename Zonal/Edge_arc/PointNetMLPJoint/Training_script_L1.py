@@ -30,7 +30,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ==== PER-ABLATION CONFIG ====
 TARGET_NAMES: List[str] = ["Stress", "LogLife"]
-INPUT_COLS: List[int] = [0, 1, 3]
 H5_FILENAME: str = "disc_dataset_edge_deriv_zonal.h5"
 EXPECTED_REPR: str = "edge"
 # ==== END PER-ABLATION CONFIG ====
@@ -58,7 +57,7 @@ def build_enc_norm(
     coord_half_range: torch.Tensor,
     extra_feat_stats: Dict[int, Dict[str, float]],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Build per-INPUT_COL normalization (mean, std) vectors aligned to INPUT_COLS.
+    """Build per-EXTRA_FEAT_COL normalization (mean, std) vectors aligned to EXTRA_FEAT_COLS.
 
     Cols 0/1 use coord min-max (center, half_range); other cols use z-score stats.
     """
@@ -863,6 +862,7 @@ def train(
 
 
 def main(preset_name: str = "S0", batch=8) -> None:
+    global EXTRA_FEAT_COLS
     global EXTRA_FEAT_COLS  # [patch_extra_feat_cols_global] global declaration inserted
     # preset_name = "S0"
     # batch = 8
