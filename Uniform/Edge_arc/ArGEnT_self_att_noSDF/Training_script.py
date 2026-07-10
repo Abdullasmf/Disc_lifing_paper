@@ -1,3 +1,4 @@
+# [fix_extra_feat_cols_scope] patched
 import random
 import json
 import hashlib
@@ -33,6 +34,8 @@ INPUT_COLS: List[int] = [0, 1, 3]
 H5_FILENAME: str = "disc_dataset_edge_deriv_uniform.h5"
 EXPECTED_REPR: str = "edge"
 # ==== END PER-ABLATION CONFIG ====
+
+EXTRA_FEAT_COLS: List[int] = []  # populated in main() from data width
 
 NUM_TARGETS: int = len(TARGET_NAMES)
 QUERY_COLS: List[int] = [0, 1]  # head query always uses (x, r)
