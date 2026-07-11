@@ -2,7 +2,7 @@
 #SBATCH --job-name=GPU0(ArGEnT)
 #SBATCH --output=Disc_lifing_paper/GPU0.log
 #SBATCH --error=Disc_lifing_paper/GPU0.log
-#SBATCH --time=48:00:00
+#SBATCH --time=60:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
