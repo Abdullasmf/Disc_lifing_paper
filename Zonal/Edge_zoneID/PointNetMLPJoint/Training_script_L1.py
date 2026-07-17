@@ -900,8 +900,14 @@ def main(preset_name: str = "S0", batch=8) -> None:
     PS_list_whole = load_h5_pointsets(h5py_path)
     print(f"Loaded {len(PS_list_whole)} datasets from the HDF5 file.")
     width0 = int(PS_list_whole[0].shape[1])
-    EXTRA_FEAT_COLS = list(range(2, width0 - 2))
-    print(f"[patch_pointnet_features] EXTRA_FEAT_COLS={EXTRA_FEAT_COLS} (n={len(EXTRA_FEAT_COLS)})")
+    # # [fix_ablation_extra_feat_cols] patched: hardcoded for Edge_zoneID ablation
+    EXTRA_FEAT_COLS = [2]
+    if width0 < 5:
+        raise RuntimeError(
+            f"Dataset width {width0} is too narrow for Edge_zoneID ablation "
+            f"(need at least 5 columns). Wrong H5 file?"
+        )
+    print(f"EXTRA_FEAT_COLS=[2] (1 extra feature(s)) for Edge_zoneID ablation")
 
     # Load external presets JSON to allow expanding model zoo without editing this script
     presets_path = Path(project_dir, "model_presets.json")
@@ -1026,8 +1032,14 @@ def main(preset_name: str = "S0", batch=8) -> None:
         # Backward compatibility: recompute extra_feat_stats if absent in old checkpoints
         if resume_checkpoint.get("extra_feat_stats") is not None:
             extra_feat_stats = resume_checkpoint["extra_feat_stats"]
-            if resume_checkpoint.get("extra_feat_cols") is not None:  # [patch_checkpoint_cols] resume patched
-                EXTRA_FEAT_COLS = resume_checkpoint["extra_feat_cols"]
+            if resume_checkpoint.get("extra_feat_cols") is not None:
+                _ckpt_efc = resume_checkpoint["extra_feat_cols"]
+                if _ckpt_efc != [2]:
+                    raise RuntimeError(
+                        f"Checkpoint extra_feat_cols {_ckpt_efc} != ablation EXTRA_FEAT_COLS [2]. "
+                        "The checkpoint was trained with wrong feature columns. "
+                        "Delete the stale checkpoint and retrain."
+                    )
 
     print(
         f"Coord center={coord_center.numpy()}, half_range={coord_half_range.numpy()} | target_mean={target_mean.numpy()}, target_std={target_std.numpy()}"

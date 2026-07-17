@@ -771,10 +771,15 @@ def main(preset_name: str = "S0", batch=8) -> None:
     PS_list_whole = load_h5_pointsets(h5py_path)
     print(f"Loaded {len(PS_list_whole)} datasets from the HDF5 file.")
     width0 = int(PS_list_whole[0].shape[1])
-    EXTRA_FEAT_COLS = list(range(2, width0 - 2))
-    HEAD_FEAT_COLS = list(range(2, width0 - 2))
-    print(f"[patch_pointnet_features] EXTRA_FEAT_COLS={EXTRA_FEAT_COLS} (n={len(EXTRA_FEAT_COLS)})")
-    print(f"[patch_pointnet_features] HEAD_FEAT_COLS={HEAD_FEAT_COLS} (n={len(HEAD_FEAT_COLS)})")
+    # # [fix_ablation_extra_feat_cols] patched: hardcoded for Edge_arc ablation
+    EXTRA_FEAT_COLS = [3]
+    HEAD_FEAT_COLS = [3]  # same as EXTRA_FEAT_COLS for Edge_arc
+    if width0 < 6:
+        raise RuntimeError(
+            f"Dataset width {width0} is too narrow for Edge_arc ablation "
+            f"(need at least 6 columns). Wrong H5 file?"
+        )
+    print(f"EXTRA_FEAT_COLS=HEAD_FEAT_COLS=[3] (1 feature(s)) for Edge_arc ablation")
 
     # Load external presets JSON to allow expanding model zoo without editing this script
     presets_path = Path(project_dir, "model_presets.json")
@@ -891,10 +896,21 @@ def main(preset_name: str = "S0", batch=8) -> None:
         # Backward compatibility: recompute extra_feat_stats if absent in old checkpoints
         if resume_checkpoint.get("extra_feat_stats") is not None:
             extra_feat_stats = resume_checkpoint["extra_feat_stats"]
-            if resume_checkpoint.get("extra_feat_cols") is not None:  # [patch_checkpoint_cols] resume patched
-                EXTRA_FEAT_COLS = resume_checkpoint["extra_feat_cols"]
+            if resume_checkpoint.get("extra_feat_cols") is not None:
+                _ckpt_efc = resume_checkpoint["extra_feat_cols"]
+                if _ckpt_efc != [3]:
+                    raise RuntimeError(
+                        f"Checkpoint extra_feat_cols {_ckpt_efc} != ablation EXTRA_FEAT_COLS [3]. "
+                        "The checkpoint was trained with wrong feature columns. "
+                        "Delete the stale checkpoint and retrain."
+                    )
             if resume_checkpoint.get("head_feat_cols") is not None:
-                HEAD_FEAT_COLS = resume_checkpoint["head_feat_cols"]
+                _ckpt_hfc = resume_checkpoint["head_feat_cols"]
+                if _ckpt_hfc != [3]:
+                    raise RuntimeError(
+                        f"Checkpoint head_feat_cols {_ckpt_hfc} != ablation HEAD_FEAT_COLS [3]. "
+                        "Delete the stale checkpoint and retrain."
+                    )
 
     print(
         "Using per-target z-score normalization so Stress (~200-1200) and LogLife (~3-7) are balanced during training."
