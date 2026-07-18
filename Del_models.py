@@ -15,6 +15,8 @@ for folder in folders1:
     #folders in folder
     subfolders = [f for f in folder.iterdir() if f.is_dir()]
     for subfolder in subfolders:
+        if "ArGEnT" in str(subfolder):
+            continue
         ptPath = Path(subfolder, "Trained_models")
         #glob for .pt files in ptPath
         pt_files = glob.glob(str(ptPath) + "/*.pt")
@@ -24,6 +26,8 @@ for folder in folders2:
     #folders in folder
     subfolders = [f for f in folder.iterdir() if f.is_dir()]
     for subfolder in subfolders:
+        if "ArGEnT" in str(subfolder):
+            continue
         ptPath = Path(subfolder, "Trained_models")
         #glob for .pt files in ptPath
         pt_files = glob.glob(str(ptPath) + "/*.pt")

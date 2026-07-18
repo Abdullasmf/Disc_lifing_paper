@@ -56,32 +56,36 @@ NOMINAL_GEOMETRY_MM: Dict[str, float] = {
 }
 
 MIN_OFFSET_MM = {
-    "bore_radius_inner":       -4.0,
-    "bore_height":             -2.5,
-    "bore_thickness":          -8.0,   # widened from -6.0 — let bore get much thinner
-    "lower_transition_height": -2.0,
-    "web_height":              -8.0,
-    "web_thickness":           -4.0,   # widened from -2.0 — let web get much thinner (more critical)
-    "upper_transition_height": -2.0,
-    "rim_height":              -3.5,
-    "rim_thickness":           -6.0,   # widened from -4.0 — let rim compete too
-    "lower_fillet_radius":     -1.2,   # reset to original symmetric range
-    "upper_fillet_radius":     -1.2,
+    # Bore bore: inner radius tolerance on a ~24mm bore → ±0.15mm is realistic ISO H7/h6
+    "bore_radius_inner":        -0.15,
+    # Axial heights: typical turning/grinding tolerance ±0.3–0.5mm for these dimensions
+    "bore_height":              -0.40,
+    "bore_thickness":           -0.50,
+    "lower_transition_height":  -0.40,
+    "web_height":               -0.60,   # longest feature, slightly wider tolerance
+    "web_thickness":            -0.40,   # most life-sensitive bulk dimension
+    "upper_transition_height":  -0.40,
+    "rim_height":               -0.40,
+    "rim_thickness":            -0.50,
+    # Fillet radii: form-ground or EDM'd, ±0.10mm is achievable and life-critical
+    "lower_fillet_radius":      -0.10,
+    "upper_fillet_radius":      -0.10,
 }
 
 MAX_OFFSET_MM = {
-    "bore_radius_inner":       +4.0,
-    "bore_height":             +2.5,
-    "bore_thickness":          +6.0,
-    "lower_transition_height": +2.0,
-    "web_height":              +8.0,
-    "web_thickness":           +6.0,   # widened from +2.0 — let web get much thicker (less critical sometimes)
-    "upper_transition_height": +2.0,
-    "rim_height":              +3.5,
-    "rim_thickness":           +4.0,
-    "lower_fillet_radius":     +1.2,
-    "upper_fillet_radius":     +1.2,
+    "bore_radius_inner":        +0.15,
+    "bore_height":              +0.40,
+    "bore_thickness":           +0.50,
+    "lower_transition_height":  +0.40,
+    "web_height":               +0.60,
+    "web_thickness":            +0.40,
+    "upper_transition_height":  +0.40,
+    "rim_height":               +0.40,
+    "rim_thickness":            +0.50,
+    "lower_fillet_radius":      +0.10,
+    "upper_fillet_radius":      +0.10,
 }
+
 REPRESENTATIONS = ("edge", "edge_proximity", "full")
 THICKNESS_ORDERING_GAP_MM = 0.5
 

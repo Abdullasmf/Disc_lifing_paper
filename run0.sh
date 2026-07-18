@@ -2,7 +2,7 @@
 #SBATCH --job-name=GPU0(ArGEnT)
 #SBATCH --output=Disc_lifing_paper/GPU0.log
 #SBATCH --error=Disc_lifing_paper/GPU0.log
-#SBATCH --time=60:00:00
+#SBATCH --time=80:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
@@ -33,8 +33,8 @@ echo "===============================Zonal-Edge-Proximity-ArGEnT================
 python -u Disc_lifing_paper/Zonal/Edge_Prox/ArGEnT_self_att_noSDF/GPU0.py --preset S --initial-batch 2
 echo "===============================Zonal-Edge-ZoneID-ArGEnT==============================="
 python -u Disc_lifing_paper/Zonal/Edge_zoneID/ArGEnT_self_att_noSDF/GPU0.py --preset S --initial-batch 2
-echo "===============================Zonal-Full-ArGEnT==============================="
-python -u Disc_lifing_paper/Zonal/Full/ArGEnT_self_att_noSDF/GPU0.py --preset S --initial-batch 2
+# echo "===============================Zonal-Full-ArGEnT==============================="
+# python -u Disc_lifing_paper/Zonal/Full/ArGEnT_self_att_noSDF/GPU0.py --preset S --initial-batch 2
 
 echo "CHANGING TO UNIFORM DATASET"
 echo "===============================Uniform-Edge-ArGEnT==============================="
@@ -47,7 +47,7 @@ echo "===============================Uniform-Edge-No-Stress-ArGEnT==============
 python -u Disc_lifing_paper/Uniform/Edge_no_stress/ArGEnT_self_att_noSDF/GPU0.py --preset S --initial-batch 2
 echo "===============================Uniform-Edge-Proximity-ArGEnT==============================="
 python -u Disc_lifing_paper/Uniform/Edge_Prox/ArGEnT_self_att_noSDF/GPU0.py --preset S --initial-batch 2
-echo "===============================Uniform-Full-ArGEnT==============================="
-python -u Disc_lifing_paper/Uniform/Full/ArGEnT_self_att_noSDF/GPU0.py --preset S --initial-batch 2
+# echo "===============================Uniform-Full-ArGEnT==============================="
+# python -u Disc_lifing_paper/Uniform/Full/ArGEnT_self_att_noSDF/GPU0.py --preset S --initial-batch 2
 
 echo "DONE"
