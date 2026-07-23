@@ -22,6 +22,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+# inference_helpers is in the same package directory; no circular dependency
+# (inference_helpers does not import from model_loading)
+from inference_helpers import build_pointnet_features, build_argent_features  # type: ignore[import]
+
 # ---------------------------------------------------------------------------
 # Repo paths
 # ---------------------------------------------------------------------------
@@ -29,6 +33,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _POINTNET_DIR = _REPO_ROOT / "Zonal" / "Edge_zoneID" / "PointNetMLPJoint"
 _ARGENT_DIR   = _REPO_ROOT / "Zonal" / "Edge_zoneID" / "ArGEnT_self_att_noSDF"
+
+# Feature-column index for zone_id (shared with inference_helpers.py)
+ZONE_ID_FEATURE_INDEX: int = 2
+
+# Default fallback zone_id normalisation stats (mean=0, std=4 as in training)
+_ZONE_ID_DEFAULT_STATS: Dict = {"mean": 0.0, "std": 4.0}
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +200,11 @@ def _extract_norm_stats(ckpt: Dict) -> Dict:
         "coord_half_range": ckpt["coord_half_range"].cpu().float(),
         "target_mean":      ckpt["target_mean"].cpu().float(),
         "target_std":       ckpt["target_std"].cpu().float(),
-        "extra_feat_stats": ckpt.get("extra_feat_stats", {2: {"mean": 0.0, "std": 4.0}}),
-        "extra_feat_cols":  ckpt.get("extra_feat_cols", [2]),
+        "extra_feat_stats": ckpt.get(
+            "extra_feat_stats",
+            {ZONE_ID_FEATURE_INDEX: _ZONE_ID_DEFAULT_STATS},
+        ),
+        "extra_feat_cols":  ckpt.get("extra_feat_cols", [ZONE_ID_FEATURE_INDEX]),
     }
 
 
@@ -231,9 +244,6 @@ def predict_life_field(
     life_field : np.ndarray, shape [M]
         Predicted life (cycles) at each mesh node.
     """
-    # Import feature builders here to avoid circular imports at module level
-    from inference_helpers import build_pointnet_features, build_argent_features  # type: ignore[import]
-
     device = torch.device(device)
     target_mean = ckpt_stats["target_mean"].to(device)
     target_std  = ckpt_stats["target_std"].to(device)

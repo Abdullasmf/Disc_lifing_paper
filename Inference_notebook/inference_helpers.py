@@ -51,6 +51,21 @@ from Data_gen.features import (
 )
 from Data_gen.mesh_ops import assign_zone_and_region_from_radius
 
+# ---------------------------------------------------------------------------
+# Named constants
+# ---------------------------------------------------------------------------
+
+# Column index for zone_id in the per-point feature tensor assembled during
+# training (see Training_script.py: columns = [x, r, zone_id, ...]).
+# Fixed scaling: zone_id is normalised as (value - 0) / 4.0 to map {0..4}→{0..1}.
+ZONE_ID_FEATURE_INDEX: int = 2
+
+# Weight applied to axial (x) deviation when scoring candidate nodes for each
+# canonical life-point location.  Small value ensures radial proximity dominates
+# while still favouring centreline nodes when two candidates share similar radial
+# distance.
+X_DEVIATION_WEIGHT: float = 0.05
+
 
 # ---------------------------------------------------------------------------
 # Geometry generation
@@ -203,8 +218,8 @@ def build_pointnet_features(
 
     # Zone_id feature — fixed scaling: mean=0, std=4
     zone_id = torch.tensor(data["edge_zone_id"], dtype=torch.float32)
-    z_mean = float(extra_feat_stats[2]["mean"])
-    z_std  = max(float(extra_feat_stats[2]["std"]), 1e-8)
+    z_mean = float(extra_feat_stats[ZONE_ID_FEATURE_INDEX]["mean"])
+    z_std  = max(float(extra_feat_stats[ZONE_ID_FEATURE_INDEX]["std"]), 1e-8)
     geom_feats_norm = ((zone_id - z_mean) / z_std).unsqueeze(-1)  # [N, 1]
 
     # Query points (full mesh nodes) — same coordinate normalisation
@@ -248,8 +263,8 @@ def build_argent_features(
     coord_half_range = ckpt_stats["coord_half_range"].float().clamp(min=1e-8)
     extra_feat_stats = ckpt_stats["extra_feat_stats"]
 
-    z_mean = float(extra_feat_stats[2]["mean"])
-    z_std  = max(float(extra_feat_stats[2]["std"]), 1e-8)
+    z_mean = float(extra_feat_stats[ZONE_ID_FEATURE_INDEX]["mean"])
+    z_std  = max(float(extra_feat_stats[ZONE_ID_FEATURE_INDEX]["std"]), 1e-8)
 
     enc_mean = torch.tensor(
         [float(coord_center[0]), float(coord_center[1]), z_mean],
@@ -325,7 +340,7 @@ def get_key_life_points(
         dr = np.abs(mesh_nodes[:, 1] - r_mid)
         dx = np.abs(mesh_nodes[:, 0])
         # Weight x deviation lightly so we prefer near-centreline nodes
-        score = dr + 0.05 * dx
+        score = dr + X_DEVIATION_WEIGHT * dx
         indices[name] = int(np.argmin(score))
 
     return indices
