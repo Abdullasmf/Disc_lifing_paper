@@ -540,14 +540,24 @@ def train(
                     loss = (diff2 * mask).sum() / denom
                 else:
                     loss = diff2.mean()
+            if not torch.isfinite(loss):
+                print(f"Non-finite loss detected at epoch {epoch}; skipping batch.")
+                optimizer.zero_grad(set_to_none=True)
+                continue
 
 
-            scaler.scale(loss).backward()
-            if grad_clip_norm is not None:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
-            scaler.step(optimizer)
-            scaler.update()
+            if use_amp and device.type == "cuda":
+                scaler.scale(loss).backward()
+                if grad_clip_norm is not None:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                if grad_clip_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+                optimizer.step()
 
             train_loss += loss.item() * Bmul
             ntrain += Bmul
@@ -886,7 +896,7 @@ def main(preset_name: str = "S0", batch=8) -> None:
         save_path=save_path,
         early_stopping_patience=early_stopping_patience,
         early_stopping_min_delta=early_stopping_min_delta,
-        use_amp=(device.type == "cuda"),
+        use_amp=False,
     )
 
 
