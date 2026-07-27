@@ -37,7 +37,7 @@ EXPECTED_REPR: str = "edge"
 NUM_TARGETS: int = len(TARGET_NAMES)
 QUERY_COLS: List[int] = [0, 1]  # head query always uses (x, r)
 
-Perc_training_data: float = 0.1  # fraction of training data to keep and rest to discard (for ablation studies)
+Perc_training_data: float = 0.25  # fraction of training data to keep and rest to discard (for ablation studies)
 
 def target_cols_for_width(width: int) -> Tuple[int, ...]:
     """Loader appends stress at width-2 and log10(life) at width-1.
