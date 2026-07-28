@@ -570,38 +570,36 @@ def train(
                     device
                 )  # [N, NUM_TARGETS] standardized
                 N = pts.shape[0]
-                with torch.cuda.amp.autocast(
-                    enabled=(device.type == "cuda" and use_amp)
-                ):
-                    # Change to — consistent with train path
-                    gf_val = geom_feats.unsqueeze(0)  # always a tensor; [1,N,0] when no extra feats
-                    pred = model(geom_xyz.unsqueeze(0), pts.unsqueeze(0), gf_val)
-                if pred.shape[-1] != target.shape[-1]:
-                    raise RuntimeError(
-                        f"Model/data mismatch in validation: pred has {pred.shape[-1]} outputs but target has {target.shape[-1]}"
-                    )
+                with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and use_amp)):
+                    gf_val = geom_feats.unsqueeze(0)
+                    pred = model(geom_xyz.unsqueeze(0), pts.unsqueeze(0), gf_val)   # [1,N,2]
+                    target_b = target.unsqueeze(0)                                  # [1,N,2]
 
-                loss = (pred - target).pow(2).mean()
-                val_loss += loss.item() * N
-
-                target_std_v = target_std_d.view(1, -1)
-                target_mean_v = target_mean_d.view(1, -1)
-                pred_raw = pred * target_std_v + target_mean_v
-                true_raw = target * target_std_v + target_mean_v
-
-                if epoch == 1 and count_val_points == 0:
-                    print(
-                        f"DEBUG: target_mean={target_mean_d.cpu().numpy()}, target_std={target_std_d.cpu().numpy()}"
-                    )
-                    for j, name in enumerate(target_names):
-                        print(
-                            f"DEBUG: {name} Pred range: {pred_raw[:, j].min().item():.2f} - {pred_raw[:, j].max().item():.2f}"
+                    if pred.shape[-1] != target_b.shape[-1]:
+                        raise RuntimeError(
+                            f"Model/data mismatch in validation: pred has {pred.shape[-1]} outputs but target has {target_b.shape[-1]}"
                         )
 
-                d = pred_raw - true_raw
-                se_sum += torch.sum(d**2, dim=0).double().cpu()
-                sum_y += torch.sum(true_raw, dim=0).double().cpu()
-                sum_y2 += torch.sum(true_raw**2, dim=0).double().cpu()
+                    loss = (pred - target_b).pow(2).mean()
+                    val_loss += loss.item() * N
+
+                    target_std_v = target_std_d.view(1, 1, -1)
+                    target_mean_v = target_mean_d.view(1, 1, -1)
+                    pred_raw = pred * target_std_v + target_mean_v
+                    true_raw = target_b * target_std_v + target_mean_v
+
+                    if epoch == 1 and count_val_points == 0:
+                        print(f"DEBUG: target_mean={target_mean_d.cpu().numpy()}, target_std={target_std_d.cpu().numpy()}")
+                        for j, name in enumerate(target_names):
+                            print(
+                                f"DEBUG: {name} Pred range: "
+                                f"{pred_raw[..., j].min().item():.2f} - {pred_raw[..., j].max().item():.2f}"
+                            )
+
+                    d = pred_raw - true_raw
+                    se_sum += torch.sum(d**2, dim=(0, 1)).double().cpu()
+                    sum_y += torch.sum(true_raw, dim=(0, 1)).double().cpu()
+                    sum_y2 += torch.sum(true_raw**2, dim=(0, 1)).double().cpu()
 
                 count_val_points += int(N)
                 nval += N

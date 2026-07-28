@@ -679,7 +679,7 @@ class PointNetMLPJoint_FP(nn.Module):
 
         # 1. Pre MLP
         xyz_enc = self.posenc(geom_xyz) if self.posenc is not None else geom_xyz
-        x_in = torch.cat([xyz_enc, geom_feats], dim=-1) if geom_feats is not None else xyz_enc
+        x_in = torch.cat([xyz_enc, geom_feats], dim=-1) if (geom_feats is not None and geom_feats.numel() > 0) else xyz_enc
         pre_feats = self.pre(x_in.reshape(B * N, -1)).reshape(B, N, -1)  # [B, N, pre_out_ch]
 
         # 2. SA1 — save xyz and features for FP skip
@@ -710,7 +710,9 @@ class PointNetMLPJoint_FP(nn.Module):
         z_exp = z.unsqueeze(1).expand(-1, Q, -1)
         x = torch.cat([node_feats, z_exp, q_enc], dim=-1)        # [B, Q, head_in_dim]
         x = x.reshape(B * Q, -1)
-        return self.head(x).reshape(B, Q, self.out_dim)
+        y = self.head(x).reshape(B, Q, self.out_dim)
+        assert y.shape == (B, Q, self.out_dim)
+        return y
 
 def build_fp_model_from_arch(arch: Dict[str, Any]) -> PointNetMLPJoint_FP:
     encoder_cfg = arch.get("encoder_cfg", None)
