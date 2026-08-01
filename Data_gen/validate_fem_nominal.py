@@ -28,8 +28,8 @@ except ImportError:
     from Data_gen.sample_generator import generate_sample
 
 
-PEAK_STRESS_MIN_MPA = 350.0
-PEAK_STRESS_MAX_MPA = 650.0
+PEAK_STRESS_MIN_MPA = 300.0
+PEAK_STRESS_MAX_MPA = 800.0
 
 
 def main() -> None:

@@ -12,11 +12,16 @@ from .config import (
     CYCLE_PHASES,
     CYCLE_PHASE_WEIGHTS,
     CYCLE_SPEED_FACTORS,
+    MAX_FLANGE_OFFSET_MM,
     MAX_OFFSET_MM,
+    MIN_FLANGE_OFFSET_MM,
     MIN_OFFSET_MM,
+    NOMINAL_FLANGE_MM,
     NOMINAL_GEOMETRY_MM,
     REGION_NAME_TO_ID,
+    SUBZONE_NAME_TO_ID,
     ZONE_TO_REGION,
+    ZONE_TO_SUBZONE,
     ZONE_NAME_TO_ID,
 )
 
@@ -35,9 +40,9 @@ def create_dataset_file(
     h5f = h5py.File(output_h5_path, "w")
 
     h5f.attrs["generator_name"] = "synthetic_axisymmetric_disc_two_layer"
-    h5f.attrs["generator_version"] = "3.2"
+    h5f.attrs["generator_version"] = "4.0"
     h5f.attrs["generator/name"] = "synthetic_axisymmetric_disc_two_layer"
-    h5f.attrs["generator/version"] = "3.2"
+    h5f.attrs["generator/version"] = "4.0"
     h5f.attrs["representation"] = representation
     h5f.attrs["include_derivatives"] = bool(include_derivatives)
     h5f.attrs["units"] = "mm"
@@ -50,6 +55,12 @@ def create_dataset_file(
     h5f.create_dataset("nominal_parameter_table", data=_as_key_value_table(NOMINAL_GEOMETRY_MM))
     h5f.create_dataset("min_offset_table", data=_as_key_value_table(MIN_OFFSET_MM))
     h5f.create_dataset("max_offset_table", data=_as_key_value_table(MAX_OFFSET_MM))
+
+    # Flange parameter tables (v4.0 addition; backward-compatible new datasets).
+    h5f.create_dataset("nominal_flange_table", data=_as_key_value_table(NOMINAL_FLANGE_MM))
+    h5f.create_dataset("min_flange_offset_table", data=_as_key_value_table(MIN_FLANGE_OFFSET_MM))
+    h5f.create_dataset("max_flange_offset_table", data=_as_key_value_table(MAX_FLANGE_OFFSET_MM))
+
     h5f.create_dataset(
         "zone_name_to_id_mapping",
         data=np.array([f"{k}:{v}" for k, v in ZONE_NAME_TO_ID.items()], dtype="S64"),
@@ -61,6 +72,15 @@ def create_dataset_file(
     h5f.create_dataset(
         "zone_to_region_mapping",
         data=np.array([f"{k}:{ZONE_TO_REGION[k]}" for k in ZONE_NAME_TO_ID.keys()], dtype="S64"),
+    )
+    # Subzone mapping (v4.0 addition).
+    h5f.create_dataset(
+        "subzone_name_to_id_mapping",
+        data=np.array([f"{k}:{v}" for k, v in SUBZONE_NAME_TO_ID.items()], dtype="S64"),
+    )
+    h5f.create_dataset(
+        "zone_to_subzone_mapping",
+        data=np.array([f"{k}:{ZONE_TO_SUBZONE.get(k, 'rim_main')}" for k in ZONE_NAME_TO_ID.keys()], dtype="S64"),
     )
 
     h5f.create_group("samples")
@@ -80,6 +100,17 @@ def write_sample_group(h5f: h5py.File, sample_id: int, sample_seed: int, sample:
     for key, value in sample["geometry_parameters_actual"].items():
         actual.attrs[key] = float(value)
 
+    # Flange parameters (v4.0).
+    if "flange_param_offsets" in sample:
+        fl_offs = sg.create_group("flange_param_offsets")
+        for key, value in sample["flange_param_offsets"].items():
+            fl_offs.attrs[key] = float(value)
+
+    if "flange_parameters_actual" in sample:
+        fl_actual = sg.create_group("flange_parameters_actual")
+        for key, value in sample["flange_parameters_actual"].items():
+            fl_actual.attrs[key] = float(value)
+
     write_keys = [
         "node_coords_mm",
         "zone_id",
@@ -97,6 +128,16 @@ def write_sample_group(h5f: h5py.File, sample_id: int, sample_seed: int, sample:
         "zone_names",
         "radial_breaks_mm",
     ]
+
+    # Optional new fields (v4.0) — written only if present.
+    optional_new_keys = [
+        "subzone_id",
+        "contour_subzone_id",
+        "subzone_names",
+    ]
+    for k in optional_new_keys:
+        if k in sample:
+            write_keys.append(k)
 
     if "arc_length_mm" in sample:
         write_keys.append("arc_length_mm")
