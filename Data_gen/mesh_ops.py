@@ -81,7 +81,10 @@ def generate_mesh(
     r2 = float(radial_breaks[2])   # lower_transition / web boundary
     r3 = float(radial_breaks[3])   # web / upper_transition boundary
     r4 = float(radial_breaks[4])   # upper_transition / rim boundary
-    r5 = float(radial_breaks[5])   # rim outer radius
+    r5 = float(radial_breaks[5])   # rim outer radius (main cap)
+
+    # r_max from the actual contour may exceed r5 when flanges are present.
+    r_max_contour = float(contour_points[:, 1].max())
 
     gmsh.initialize()
     gmsh.option.setNumber("General.Terminal", 0)
@@ -178,7 +181,7 @@ def generate_mesh(
         _add_threshold(bore_pts, LC_BORE, BORE_INFLUENCE_MM * 2.0)
 
         # ------------------------------------------------------------------
-        # 3d. Rim outer face (r ~ r5).
+        # 3d. Rim outer face (r ~ r5) AND flange top (r ~ r_max_contour if flanges present).
         # ------------------------------------------------------------------
         rim_pts = [
             point_tags[i]
@@ -186,6 +189,25 @@ def generate_mesh(
             if abs(r - r5) < RIM_INFLUENCE_MM
         ]
         _add_threshold(rim_pts, LC_RIM, RIM_INFLUENCE_MM * 2.0)
+
+        # 3e. Flange outer face — if flanges are present the contour extends
+        #     beyond r5.  Add a second refinement at the flange outer radius to
+        #     resolve the shoulder fillet stress concentration.
+        if r_max_contour > r5 + 0.5:   # only when flanges add meaningful radial height
+            flange_pts = [
+                point_tags[i]
+                for i, (_, r) in enumerate(contour_points)
+                if abs(r - r_max_contour) < RIM_INFLUENCE_MM
+            ]
+            _add_threshold(flange_pts, LC_FILLET, FILLET_INFLUENCE_MM)
+
+            # Also refine the shoulder region: points at r between r5 and r_max_contour.
+            shoulder_pts = [
+                point_tags[i]
+                for i, (_, r) in enumerate(contour_points)
+                if r5 + 0.2 < r < r_max_contour - 0.2
+            ]
+            _add_threshold(shoulder_pts, LC_FILLET, FILLET_INFLUENCE_MM * 0.75)
 
         if all_threshold_ids:
             if len(all_threshold_ids) > 1:

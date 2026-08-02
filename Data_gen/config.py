@@ -89,6 +89,125 @@ MAX_OFFSET_MM = {
 REPRESENTATIONS = ("edge", "edge_proximity", "full")
 THICKNESS_ORDERING_GAP_MM = 0.5
 
+# ---------------------------------------------------------------------------
+# Sub-zone identifiers for fine-grained region labeling.
+# These refine the existing ZONE_NAME_TO_ID labels without replacing them.
+# zone_id remains the primary label for S-N curve selection; subzone_id is
+# available as an additional feature channel for geometry-aware models.
+# ---------------------------------------------------------------------------
+SUBZONE_NAME_TO_ID: Dict[str, int] = {
+    "bore":               0,
+    "lower_transition":   1,
+    "web":                2,
+    "upper_transition":   3,
+    "rim_main":           4,   # main outer cap at r = r5
+    "front_flange":       5,   # front flange face + top
+    "rear_flange":        6,   # rear flange face + top
+    "front_shoulder":     7,   # shoulder transition (front flange → main cap)
+    "rear_shoulder":      8,   # shoulder transition (main cap → rear flange)
+}
+SUBZONE_ID_TO_NAME: Dict[int, str] = {v: k for k, v in SUBZONE_NAME_TO_ID.items()}
+
+# Map from existing zone_name to subzone for the non-flange parts of the disc.
+# Flange subzone labels are assigned explicitly during outer-cap construction.
+ZONE_TO_SUBZONE: Dict[str, str] = {
+    "bore":               "bore",
+    "lower_transition":   "lower_transition",
+    "web":                "web",
+    "upper_transition":   "upper_transition",
+    "rim":                "rim_main",
+}
+
+# ---------------------------------------------------------------------------
+# Flange geometry parameters (outer-rim front/rear flanges).
+#
+# Physical basis:
+#   Real turbine discs have front and rear flanges on the outer rim that:
+#     - Bolt to adjacent discs/sealings/spacers (axial flanges)
+#     - Create axially visible step/shoulder features
+#     - Introduce local stress concentrations at shoulder fillets
+#   These flanges are edge-visible geometry and are the key features driving
+#   stress localisation that is NOT present in the current flat outer cap.
+#
+# Geometry definition (all in mm, disc x-axis = axial, r-axis = radial):
+#   The outer cap (currently flat at r = r5 from x=-t_rim/2 to x=+t_rim/2)
+#   is replaced by a path that includes:
+#     front flange face (vertical, at x = -t_rim/2):
+#       from r5 up to r5 + front_flange_radial_height
+#     front flange top-corner fillet (front_fillet_radius)
+#     front flange top (horizontal at r5 + front_flange_radial_height):
+#       from x = -t_rim/2 inward by front_flange_axial_length
+#     front shoulder smooth descent (rim_to_flange_fillet_radius_front):
+#       blend from r5+h_fl back down to r5 over front_shoulder_offset distance
+#     main outer cap (flat at r = r5)
+#     rear shoulder smooth ascent (symmetric)
+#     rear flange top + top-corner fillet (rear_fillet_radius)
+#     rear flange face (vertical, at x = +t_rim/2)
+#
+# Constraint: front_flange_axial_length + front_shoulder_offset
+#           + rear_flange_axial_length  + rear_shoulder_offset  < rim_thickness
+#   (ensures front and rear flanges do not overlap on the outer cap)
+#
+# Recommended default ranges that produce realistic discs without breaking mesh:
+#   front/rear_flange_axial_length : [2.0, 5.0] mm
+#   front/rear_flange_radial_height: [1.5, 4.0] mm
+#   front/rear_shoulder_offset     : [1.0, 2.5] mm
+#   front/rear_fillet_radius       : [0.5, 1.5] mm  (top-corner fillet)
+#   rim_to_flange_fillet_radius_*  : [0.4, 1.2] mm  (shoulder fillet)
+# ---------------------------------------------------------------------------
+
+FLANGE_GEOMETRY_PARAMETERS = (
+    "front_flange_axial_length",
+    "rear_flange_axial_length",
+    "front_flange_radial_height",
+    "rear_flange_radial_height",
+    "front_shoulder_offset",
+    "rear_shoulder_offset",
+    "front_fillet_radius",
+    "rear_fillet_radius",
+    "rim_to_flange_fillet_radius_front",
+    "rim_to_flange_fillet_radius_rear",
+)
+
+NOMINAL_FLANGE_MM: Dict[str, float] = {
+    "front_flange_axial_length":          3.5,
+    "rear_flange_axial_length":           3.5,
+    "front_flange_radial_height":         2.5,
+    "rear_flange_radial_height":          2.5,
+    "front_shoulder_offset":              1.5,
+    "rear_shoulder_offset":               1.5,
+    "front_fillet_radius":                1.0,   # top-corner fillet, front flange
+    "rear_fillet_radius":                 1.0,   # top-corner fillet, rear flange
+    "rim_to_flange_fillet_radius_front":  0.8,   # shoulder-blend fillet, front
+    "rim_to_flange_fillet_radius_rear":   0.8,   # shoulder-blend fillet, rear
+}
+
+MIN_FLANGE_OFFSET_MM: Dict[str, float] = {
+    "front_flange_axial_length":          -0.30,
+    "rear_flange_axial_length":           -0.30,
+    "front_flange_radial_height":         -0.20,
+    "rear_flange_radial_height":          -0.20,
+    "front_shoulder_offset":              -0.20,
+    "rear_shoulder_offset":               -0.20,
+    "front_fillet_radius":                -0.10,
+    "rear_fillet_radius":                 -0.10,
+    "rim_to_flange_fillet_radius_front":  -0.10,
+    "rim_to_flange_fillet_radius_rear":   -0.10,
+}
+
+MAX_FLANGE_OFFSET_MM: Dict[str, float] = {
+    "front_flange_axial_length":          +0.30,
+    "rear_flange_axial_length":           +0.30,
+    "front_flange_radial_height":         +0.20,
+    "rear_flange_radial_height":          +0.20,
+    "front_shoulder_offset":              +0.20,
+    "rear_shoulder_offset":               +0.20,
+    "front_fillet_radius":                +0.10,
+    "rear_fillet_radius":                 +0.10,
+    "rim_to_flange_fillet_radius_front":  +0.10,
+    "rim_to_flange_fillet_radius_rear":   +0.10,
+}
+
 CYCLE_PHASES = (
     "taxi",
     "takeoff",
@@ -264,3 +383,33 @@ def radial_stations_from_params(params: Dict[str, float]) -> np.ndarray:
     r4 = r3 + float(params["upper_transition_height"])
     r5 = r4 + float(params["rim_height"])
     return np.array([r0, r1, r2, r3, r4, r5], dtype=np.float64)
+
+
+def resolve_flange_parameters(flange_offsets: Dict[str, float] | None) -> Dict[str, float]:
+    """Return actual flange parameter values by applying offsets to nominal values.
+
+    Unknown keys in *flange_offsets* are silently ignored so that callers that
+    only partially specify flanges still get valid defaults for the rest.
+    """
+    actual: Dict[str, float] = {}
+    for k in FLANGE_GEOMETRY_PARAMETERS:
+        offset = float(flange_offsets.get(k, 0.0)) if flange_offsets else 0.0
+        actual[k] = float(NOMINAL_FLANGE_MM[k] + offset)
+    return actual
+
+
+def clip_flange_offsets_to_bounds(flange_offsets: Dict[str, float]) -> Dict[str, float]:
+    """Clip flange offsets to their configured min/max bounds."""
+    out: Dict[str, float] = {}
+    for k in FLANGE_GEOMETRY_PARAMETERS:
+        v = float(flange_offsets.get(k, 0.0))
+        out[k] = float(np.clip(v, MIN_FLANGE_OFFSET_MM[k], MAX_FLANGE_OFFSET_MM[k]))
+    return out
+
+
+def flange_offset_vector_to_dict(vector: np.ndarray) -> Dict[str, float]:
+    return {k: float(v) for k, v in zip(FLANGE_GEOMETRY_PARAMETERS, vector)}
+
+
+def flange_offsets_dict_to_vector(offsets: Dict[str, float]) -> np.ndarray:
+    return np.array([float(offsets.get(k, 0.0)) for k in FLANGE_GEOMETRY_PARAMETERS], dtype=np.float64)
