@@ -143,80 +143,116 @@ def _validate_simple_closed_contour(points: np.ndarray) -> None:
 
 
 def sanitize_flange_parameters(fp: Dict[str, float], t_rim: float) -> Dict[str, float]:
-    """Clip flange parameter values to physically constructible limits.
-
-    Ensures:
-    - All values are positive.
-    - Fillet radii do not exceed the flange height / axial length.
-    - Combined axial extent of both flanges + shoulders fits within t_rim.
-    """
+    """Clip stepped-rim parameter values to meshable, non-overlapping limits."""
     out = {k: max(float(v), 1e-3) for k, v in fp.items()}
 
-    # Top-corner fillet must not exceed flange radial height.
-    out["front_fillet_radius"] = min(out["front_fillet_radius"],
-                                     0.45 * out["front_flange_radial_height"])
-    out["rear_fillet_radius"]  = min(out["rear_fillet_radius"],
-                                     0.45 * out["rear_flange_radial_height"])
+    min_land = 0.8
+    min_core = 2.0
+    max_total = 0.88 * float(t_rim)
 
-    # Shoulder fillet must not exceed half the shoulder offset.
+    out["front_flange_radial_height"] = min(out["front_flange_radial_height"], 0.22 * t_rim)
+    out["rear_flange_radial_height"] = min(out["rear_flange_radial_height"], 0.22 * t_rim)
+
+    out["front_fillet_radius"] = min(
+        out["front_fillet_radius"],
+        0.45 * out["front_flange_radial_height"],
+        0.45 * out["front_flange_axial_length"],
+    )
+    out["rear_fillet_radius"] = min(
+        out["rear_fillet_radius"],
+        0.45 * out["rear_flange_radial_height"],
+        0.45 * out["rear_flange_axial_length"],
+    )
+
     out["rim_to_flange_fillet_radius_front"] = min(
-        out["rim_to_flange_fillet_radius_front"], 0.45 * out["front_shoulder_offset"]
+        out["rim_to_flange_fillet_radius_front"],
+        0.45 * out["front_flange_radial_height"],
+        0.45 * out["front_shoulder_offset"],
     )
     out["rim_to_flange_fillet_radius_rear"] = min(
-        out["rim_to_flange_fillet_radius_rear"], 0.45 * out["rear_shoulder_offset"]
+        out["rim_to_flange_fillet_radius_rear"],
+        0.45 * out["rear_flange_radial_height"],
+        0.45 * out["rear_shoulder_offset"],
     )
 
-    # Axial length must leave room for a flat top (> fillet + shoulder_fillet width).
-    min_ax = out["front_fillet_radius"] + out["rim_to_flange_fillet_radius_front"] + 1e-3
-    out["front_flange_axial_length"] = max(out["front_flange_axial_length"], min_ax)
-    min_ax_r = out["rear_fillet_radius"] + out["rim_to_flange_fillet_radius_rear"] + 1e-3
-    out["rear_flange_axial_length"] = max(out["rear_flange_axial_length"], min_ax_r)
+    out["front_flange_axial_length"] = max(
+        out["front_flange_axial_length"], out["front_fillet_radius"] + min_land
+    )
+    out["rear_flange_axial_length"] = max(
+        out["rear_flange_axial_length"], out["rear_fillet_radius"] + min_land
+    )
+    out["front_shoulder_offset"] = max(
+        out["front_shoulder_offset"], out["rim_to_flange_fillet_radius_front"] + 0.6
+    )
+    out["rear_shoulder_offset"] = max(
+        out["rear_shoulder_offset"], out["rim_to_flange_fillet_radius_rear"] + 0.6
+    )
 
-    # Combined axial extent must not exceed rim thickness (leave ≥5% clearance).
     total_ax = (
         out["front_flange_axial_length"] + out["front_shoulder_offset"]
-        + out["rear_flange_axial_length"]  + out["rear_shoulder_offset"]
+        + out["rear_flange_axial_length"] + out["rear_shoulder_offset"]
     )
-    max_total = 0.90 * float(t_rim)
     if total_ax > max_total:
         scale = max_total / total_ax
-        out["front_flange_axial_length"] *= scale
-        out["front_shoulder_offset"]     *= scale
-        out["rear_flange_axial_length"]  *= scale
-        out["rear_shoulder_offset"]      *= scale
-        # Re-clip fillets after scaling.
-        out["rim_to_flange_fillet_radius_front"] = min(
-            out["rim_to_flange_fillet_radius_front"], 0.45 * out["front_shoulder_offset"]
-        )
-        out["rim_to_flange_fillet_radius_rear"] = min(
-            out["rim_to_flange_fillet_radius_rear"], 0.45 * out["rear_shoulder_offset"]
-        )
+        for key in (
+            "front_flange_axial_length", "front_shoulder_offset",
+            "rear_flange_axial_length", "rear_shoulder_offset",
+        ):
+            out[key] *= scale
+
+    def _enforce_side(prefix: str, shoulder_key: str, land_key: str, corner_key: str) -> None:
+        out[land_key] = max(out[land_key], out[corner_key] + min_land)
+        out[shoulder_key] = max(out[shoulder_key], out[prefix] + 0.6)
+        out[prefix] = min(out[prefix], 0.45 * out[shoulder_key], 0.45 * out[land_key])
+        out[corner_key] = min(out[corner_key], 0.45 * out[land_key], 0.45 * out["front_flange_radial_height"])
+
+    _enforce_side("rim_to_flange_fillet_radius_front", "front_shoulder_offset", "front_flange_axial_length", "front_fillet_radius")
+    _enforce_side("rim_to_flange_fillet_radius_rear", "rear_shoulder_offset", "rear_flange_axial_length", "rear_fillet_radius")
+
+    total_ax = (
+        out["front_flange_axial_length"] + out["front_shoulder_offset"]
+        + out["rear_flange_axial_length"] + out["rear_shoulder_offset"]
+    )
+    if total_ax > max_total:
+        scale = max_total / total_ax
+        for key in (
+            "front_flange_axial_length", "front_shoulder_offset",
+            "rear_flange_axial_length", "rear_shoulder_offset",
+        ):
+            out[key] *= scale
+        out["front_flange_axial_length"] = max(out["front_flange_axial_length"], out["front_fillet_radius"] + min_land)
+        out["rear_flange_axial_length"] = max(out["rear_flange_axial_length"], out["rear_fillet_radius"] + min_land)
+
+    front_total = out["front_flange_axial_length"] + out["front_shoulder_offset"]
+    rear_total = out["rear_flange_axial_length"] + out["rear_shoulder_offset"]
+    core_land = float(t_rim) - front_total - rear_total
+    if core_land < min_core:
+        deficit = min_core - core_land
+        reducible_front = max(out["front_flange_axial_length"] - (out["front_fillet_radius"] + min_land), 0.0)
+        reducible_rear = max(out["rear_flange_axial_length"] - (out["rear_fillet_radius"] + min_land), 0.0)
+        reducible_sh_f = max(out["front_shoulder_offset"] - (out["rim_to_flange_fillet_radius_front"] + 0.6), 0.0)
+        reducible_sh_r = max(out["rear_shoulder_offset"] - (out["rim_to_flange_fillet_radius_rear"] + 0.6), 0.0)
+        reducible_total = reducible_front + reducible_rear + reducible_sh_f + reducible_sh_r
+        if reducible_total > 1e-9:
+            for key, reducible in (
+                ("front_flange_axial_length", reducible_front),
+                ("rear_flange_axial_length", reducible_rear),
+                ("front_shoulder_offset", reducible_sh_f),
+                ("rear_shoulder_offset", reducible_sh_r),
+            ):
+                out[key] -= deficit * (reducible / reducible_total)
 
     return out
 
 
-# ---------------------------------------------------------------------------
-# Outer-cap construction with front/rear flanges
-# ---------------------------------------------------------------------------
-
-def _quarter_arc_points(
-    center_x: float, center_r: float, radius: float,
-    angle_start_deg: float, angle_end_deg: float, n: int = 8,
-) -> np.ndarray:
-    """Return *n* points on a circular arc (exclusive of endpoint)."""
+def _arc_points(center_x: float, center_r: float, radius: float, angle_start_deg: float, angle_end_deg: float, n: int) -> np.ndarray:
     angles = np.linspace(np.deg2rad(angle_start_deg), np.deg2rad(angle_end_deg), n, endpoint=False)
-    x = center_x + radius * np.cos(angles)
-    r = center_r + radius * np.sin(angles)
-    return np.column_stack([x, r])
+    return np.column_stack([center_x + radius * np.cos(angles), center_r + radius * np.sin(angles)])
 
 
-def _cosine_descent(
-    x_start: float, x_end: float, r_start: float, r_end: float, n: int = 20,
-) -> np.ndarray:
-    """Smooth cosine blend from (x_start, r_start) to (x_end, r_end) (exclusive of endpoint)."""
-    x = np.linspace(x_start, x_end, n, endpoint=False)
-    u = (x - x_start) / max(x_end - x_start, 1e-9)
-    r = r_start + (r_end - r_start) * 0.5 * (1.0 - np.cos(np.pi * u))
+def _line_points(x0: float, r0: float, x1: float, r1: float, n: int) -> np.ndarray:
+    x = np.linspace(x0, x1, n, endpoint=False)
+    r = np.linspace(r0, r1, n, endpoint=False)
     return np.column_stack([x, r])
 
 
@@ -225,122 +261,61 @@ def _build_outer_cap_with_flanges(
     r5: float,
     fp: Dict[str, float],
     n_per_seg: int = 15,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Build the outer-cap path with front and rear flanges.
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray]]:
+    """Build the stepped rim outer boundary with one stepped feature per side."""
+    x_front = -0.5 * t_rim
+    x_rear = 0.5 * t_rim
 
-    Parameters
-    ----------
-    t_rim : float
-        Rim thickness [mm].  Front face at x = -t_rim/2, rear at x = +t_rim/2.
-    r5 : float
-        Nominal rim outer radius [mm] (top of the main cap).
-    fp : dict
-        Sanitised flange parameter dictionary.
-    n_per_seg : int
-        Approximate number of points per straight or smooth segment.
+    h_f = fp["front_flange_radial_height"]
+    h_r = fp["rear_flange_radial_height"]
+    land_f = fp["front_flange_axial_length"]
+    land_r = fp["rear_flange_axial_length"]
+    sh_f = fp["front_shoulder_offset"]
+    sh_r = fp["rear_shoulder_offset"]
+    rf_f = fp["front_fillet_radius"]
+    rf_r = fp["rear_fillet_radius"]
+    root_f = fp["rim_to_flange_fillet_radius_front"]
+    root_r = fp["rim_to_flange_fillet_radius_rear"]
 
-    Returns
-    -------
-    points : (N, 2) float64 array of [x, r] outer-cap points.
-    subzone_ids : (N,) int32 array of SUBZONE_NAME_TO_ID labels.
-    """
-    x_front = -0.5 * t_rim    # x-position of front (−) face
-    x_rear  = +0.5 * t_rim    # x-position of rear (+) face
+    x_step_front_end = x_front + land_f
+    x_root_front_end = x_step_front_end + sh_f
+    x_step_rear_start = x_rear - land_r
+    x_root_rear_start = x_step_rear_start - sh_r
+    x_core_start = x_root_front_end
+    x_core_end = x_root_rear_start
 
-    h_fl = fp["front_flange_radial_height"]
-    h_rl = fp["rear_flange_radial_height"]
-    fl_ax = fp["front_flange_axial_length"]     # front flange axial length (inward from x_front)
-    rl_ax = fp["rear_flange_axial_length"]       # rear  flange axial length (inward from x_rear)
-    sh_f  = fp["front_shoulder_offset"]          # front shoulder transition width
-    sh_r  = fp["rear_shoulder_offset"]           # rear  shoulder transition width
-    rf_f  = fp["front_fillet_radius"]            # front flange top-corner fillet
-    rf_r  = fp["rear_fillet_radius"]             # rear  flange top-corner fillet
-    rsf_f = fp["rim_to_flange_fillet_radius_front"]  # front shoulder fillet
-    rsf_r = fp["rim_to_flange_fillet_radius_rear"]   # rear  shoulder fillet
+    if x_core_end <= x_core_start:
+        raise ValueError("Invalid stepped-rim geometry: front and rear features overlap")
 
-    # Key x-positions
-    x_fl_inner = x_front + fl_ax          # inner axial edge of front flange
-    x_rl_inner = x_rear  - rl_ax          # inner axial edge of rear flange
+    sz = SUBZONE_NAME_TO_ID
+    segs: List[Tuple[np.ndarray, int]] = []
 
-    SZ = SUBZONE_NAME_TO_ID
+    segs.append((_line_points(x_front, r5, x_front, r5 + h_f - rf_f, max(5, n_per_seg // 2)), sz["front_step"]))
+    segs.append((_arc_points(x_front + rf_f, r5 + h_f - rf_f, rf_f, 180.0, 90.0, max(8, n_per_seg // 2)), sz["front_step"]))
+    segs.append((_line_points(x_front + rf_f, r5 + h_f, x_step_front_end, r5 + h_f, max(10, n_per_seg)), sz["front_step"]))
+    segs.append((_arc_points(x_step_front_end, r5 + h_f - root_f, root_f, 90.0, 0.0, max(8, n_per_seg // 2)), sz["front_shoulder"]))
+    segs.append((_line_points(x_step_front_end + root_f, r5 + h_f - root_f, x_root_front_end, r5, max(12, n_per_seg)), sz["front_shoulder"]))
 
-    segs: List[Tuple[np.ndarray, int]] = []   # (points, subzone_id)
+    segs.append((_line_points(x_core_start, r5, x_core_end, r5, max(18, 2 * n_per_seg)), sz["rim_main"]))
 
-    # ------------------------------------------------------------------
-    # 1. Front flange face: vertical at x=x_front, from r5 to r5+h_fl
-    #    No corner at the base (continuation of front face).
-    #    The corner at the top needs a fillet.
-    # ------------------------------------------------------------------
-    n_ff_face = max(4, int(n_per_seg * h_fl / max(h_fl + fl_ax, 1e-9)))
-    r_face_fl = np.linspace(r5, r5 + h_fl - rf_f, n_ff_face, endpoint=False)
-    segs.append((np.column_stack([np.full(n_ff_face, x_front), r_face_fl]), SZ["front_flange"]))
+    segs.append((_line_points(x_root_rear_start, r5, x_step_rear_start - root_r, r5 + h_r - root_r, max(12, n_per_seg)), sz["rear_shoulder"]))
+    segs.append((_arc_points(x_step_rear_start, r5 + h_r - root_r, root_r, 180.0, 90.0, max(8, n_per_seg // 2)), sz["rear_shoulder"]))
+    segs.append((_line_points(x_step_rear_start, r5 + h_r, x_rear - rf_r, r5 + h_r, max(10, n_per_seg)), sz["rear_step"]))
+    segs.append((_arc_points(x_rear - rf_r, r5 + h_r - rf_r, rf_r, 90.0, 0.0, max(8, n_per_seg // 2)), sz["rear_step"]))
+    segs.append((_line_points(x_rear, r5 + h_r - rf_r, x_rear, r5, max(5, n_per_seg // 2)), sz["rear_step"]))
 
-    # 2. Front flange top-corner fillet (90°: going-up turns to going-right)
-    #    Arc center at (x_front + rf_f, r5+h_fl - rf_f)
-    #    Arc from 180° to 90° (sweeping counterclockwise → points go left→top)
-    arc_ff = _quarter_arc_points(
-        x_front + rf_f, r5 + h_fl - rf_f, rf_f,
-        angle_start_deg=180.0, angle_end_deg=90.0, n=max(6, n_per_seg // 3),
-    )
-    segs.append((arc_ff, SZ["front_flange"]))
-
-    # 3. Front flange top: horizontal at r=r5+h_fl
-    x_fl_top_start = x_front + rf_f
-    x_fl_top_end   = x_fl_inner - rsf_f
-    if x_fl_top_end > x_fl_top_start + 1e-6:
-        n_top_f = max(4, n_per_seg)
-        x_top_f = np.linspace(x_fl_top_start, x_fl_top_end, n_top_f, endpoint=False)
-        segs.append((np.column_stack([x_top_f, np.full(n_top_f, r5 + h_fl)]), SZ["front_flange"]))
-
-    # 4. Front shoulder: smooth cosine descent from r5+h_fl to r5
-    x_sh_f_start = x_fl_inner - rsf_f
-    x_sh_f_end   = x_fl_inner + sh_f
-    seg_sh_f = _cosine_descent(x_sh_f_start, x_sh_f_end, r5 + h_fl, r5, n=max(16, n_per_seg * 2))
-    segs.append((seg_sh_f, SZ["front_shoulder"]))
-
-    # 5. Main outer cap: flat at r=r5
-    x_cap_start = x_fl_inner + sh_f
-    x_cap_end   = x_rl_inner - sh_r
-    if x_cap_end > x_cap_start + 1e-6:
-        n_cap = max(4, n_per_seg * 2)
-        x_cap = np.linspace(x_cap_start, x_cap_end, n_cap, endpoint=False)
-        segs.append((np.column_stack([x_cap, np.full(n_cap, r5)]), SZ["rim_main"]))
-
-    # 6. Rear shoulder: smooth cosine ascent from r5 to r5+h_rl
-    x_sh_r_start = x_rl_inner - sh_r
-    x_sh_r_end   = x_rl_inner + rsf_r
-    seg_sh_r = _cosine_descent(x_sh_r_start, x_sh_r_end, r5, r5 + h_rl, n=max(16, n_per_seg * 2))
-    segs.append((seg_sh_r, SZ["rear_shoulder"]))
-
-    # 7. Rear flange top: horizontal at r=r5+h_rl
-    x_rl_top_start = x_rl_inner + rsf_r
-    x_rl_top_end   = x_rear - rf_r
-    if x_rl_top_end > x_rl_top_start + 1e-6:
-        n_top_r = max(4, n_per_seg)
-        x_top_r = np.linspace(x_rl_top_start, x_rl_top_end, n_top_r, endpoint=False)
-        segs.append((np.column_stack([x_top_r, np.full(n_top_r, r5 + h_rl)]), SZ["rear_flange"]))
-
-    # 8. Rear flange top-corner fillet (90°: going-right turns to going-down)
-    #    Arc center at (x_rear - rf_r, r5+h_rl - rf_r)
-    #    Arc from 90° to 0°
-    arc_rl = _quarter_arc_points(
-        x_rear - rf_r, r5 + h_rl - rf_r, rf_r,
-        angle_start_deg=90.0, angle_end_deg=0.0, n=max(6, n_per_seg // 3),
-    )
-    segs.append((arc_rl, SZ["rear_flange"]))
-
-    # 9. Rear flange face: vertical at x=x_rear, from r5+h_rl to r5
-    n_rl_face = max(4, int(n_per_seg * h_rl / max(h_rl + rl_ax, 1e-9)))
-    r_face_rl = np.linspace(r5 + h_rl - rf_r, r5, n_rl_face, endpoint=False)
-    segs.append((np.column_stack([np.full(n_rl_face, x_rear), r_face_rl]), SZ["rear_flange"]))
-
-    points_list   = [s[0] for s in segs]
-    subzone_list  = [np.full(s[0].shape[0], s[1], dtype=np.int32) for s in segs]
-
-    return (
-        np.vstack(points_list).astype(np.float64),
-        np.concatenate(subzone_list).astype(np.int32),
-    )
+    points = np.vstack([s[0] for s in segs]).astype(np.float64)
+    subzone = np.concatenate([np.full(s[0].shape[0], s[1], dtype=np.int32) for s in segs])
+    feature_meta = {
+        "front_root": np.array([x_step_front_end + 0.6 * root_f, r5 + h_f - 0.6 * root_f], dtype=np.float64),
+        "front_outer_corner": np.array([x_front + 0.6 * rf_f, r5 + h_f - 0.6 * rf_f], dtype=np.float64),
+        "rear_root": np.array([x_step_rear_start - 0.6 * root_r, r5 + h_r - 0.6 * root_r], dtype=np.float64),
+        "rear_outer_corner": np.array([x_rear - 0.6 * rf_r, r5 + h_r - 0.6 * rf_r], dtype=np.float64),
+        "rim_core_reference": np.array([0.5 * (x_core_start + x_core_end), r5], dtype=np.float64),
+        "front_land_end": np.array([x_step_front_end, r5 + h_f], dtype=np.float64),
+        "rear_land_start": np.array([x_step_rear_start, r5 + h_r], dtype=np.float64),
+    }
+    return points, subzone, feature_meta
 
 
 def sanitize_geometry_parameters(params: Dict[str, float]) -> Dict[str, float]:
@@ -464,7 +439,7 @@ def build_disc_contour(
     t_rim = float(params["rim_thickness"])
 
     if flange_params is not None:
-        outer_cap_pts, outer_cap_subzone = _build_outer_cap_with_flanges(
+        outer_cap_pts, outer_cap_subzone, rim_feature_points = _build_outer_cap_with_flanges(
             t_rim=t_rim, r5=r5, fp=flange_params
         )
     else:
@@ -474,6 +449,7 @@ def build_disc_contour(
             np.full(20, r5, dtype=np.float64),
         ])
         outer_cap_subzone = np.full(outer_cap_pts.shape[0], SUBZONE_NAME_TO_ID["rim_main"], dtype=np.int32)
+        rim_feature_points = {}
 
     inner_cap = np.column_stack([
         np.linspace(+0.5 * params["bore_thickness"], -0.5 * params["bore_thickness"], 20, endpoint=False),
@@ -517,6 +493,7 @@ def build_disc_contour(
         "r_outer":                np.array([r5], dtype=np.float64),
         "r_flange_outer":         np.array([r_flange_outer], dtype=np.float64),
     }
+    landmarks_mm.update(rim_feature_points)
 
     metadata = {
         "radial_breaks_mm": radial_breaks,
@@ -532,7 +509,7 @@ def build_disc_contour(
 
     subzone_name_list = list({
         "bore", "lower_transition", "web", "upper_transition",
-        "rim_main", "front_flange", "rear_flange", "front_shoulder", "rear_shoulder",
+        "rim_main", "front_step", "rear_step", "front_shoulder", "rear_shoulder",
     })
 
     return ContourData(
