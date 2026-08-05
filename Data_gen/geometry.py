@@ -181,6 +181,20 @@ def sanitize_flange_parameters(fp: Dict[str, float], t_rim: float) -> Dict[str, 
     out["rear_flange_axial_length"] = max(
         out["rear_flange_axial_length"], out["rear_fillet_radius"] + min_land
     )
+
+    # --- Front relief groove: clip depth/radius so it stays within the front
+    # step (radial) and fits on the front land alongside the corner fillet and
+    # shoulder blend (axial). Must run before the land-length constraints below
+    # so groove-driven land growth is accounted for in the overlap checks.
+    out["front_groove_depth"] = min(out["front_groove_depth"], 0.9 * out["front_flange_radial_height"])
+    out["front_groove_radius"] = min(
+        out["front_groove_radius"],
+        0.45 * out["front_groove_depth"],
+        0.45 * out["front_groove_width"] / 2.0,
+    )
+    # Floor depth must exceed the groove radius so a real floor/root exists.
+    out["front_groove_depth"] = max(out["front_groove_depth"], out["front_groove_radius"] + 0.2)
+    out["front_groove_depth"] = min(out["front_groove_depth"], 0.9 * out["front_flange_radial_height"])
     out["front_shoulder_offset"] = max(
         out["front_shoulder_offset"], out["rim_to_flange_fillet_radius_front"] + 0.6
     )
@@ -242,6 +256,28 @@ def sanitize_flange_parameters(fp: Dict[str, float], t_rim: float) -> Dict[str, 
             ):
                 out[key] -= deficit * (reducible / reducible_total)
 
+    # --- Final groove-fits-in-land check, run last since front_flange_axial_length
+    # and front_fillet_radius may have shrunk above due to the overlap/core-land
+    # constraints. The groove must fit strictly within the front step land after
+    # the front outer-corner fillet, leaving a margin before the front shoulder.
+    available_land = out["front_flange_axial_length"] - out["front_fillet_radius"]
+    groove_total = out["front_groove_pos"] + out["front_groove_width"]
+    margin = 0.3
+    if groove_total > available_land - margin:
+        scale = max((available_land - margin) / max(groove_total, 1e-6), 0.0)
+        out["front_groove_pos"] *= scale
+        out["front_groove_width"] *= scale
+    # Re-clip groove radius/depth to the (possibly shrunk) width.
+    out["front_groove_radius"] = min(
+        out["front_groove_radius"],
+        0.45 * out["front_groove_depth"],
+        0.45 * out["front_groove_width"] / 2.0,
+    )
+    out["front_groove_depth"] = max(out["front_groove_depth"], out["front_groove_radius"] + 0.2)
+    out["front_groove_depth"] = min(out["front_groove_depth"], 0.9 * out["front_flange_radial_height"])
+    out["front_groove_pos"] = max(out["front_groove_pos"], 0.05)
+    out["front_groove_width"] = max(out["front_groove_width"], 2.0 * out["front_groove_radius"] + 0.05)
+
     return out
 
 
@@ -262,58 +298,142 @@ def _build_outer_cap_with_flanges(
     fp: Dict[str, float],
     n_per_seg: int = 15,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray]]:
-    """Build the stepped rim outer boundary with one stepped feature per side."""
+    """Build the blade-platform surrogate outer boundary.
+
+    Front side: front step + relief groove immediately inboard of the step's
+    outer corner fillet.  Rear side: blade-platform collar (root shoulder,
+    land, outer corner, load-transfer vertical face).
+    """
     x_front = -0.5 * t_rim
     x_rear = 0.5 * t_rim
 
-    h_f = fp["front_flange_radial_height"]
-    h_r = fp["rear_flange_radial_height"]
-    land_f = fp["front_flange_axial_length"]
-    land_r = fp["rear_flange_axial_length"]
-    sh_f = fp["front_shoulder_offset"]
-    sh_r = fp["rear_shoulder_offset"]
-    rf_f = fp["front_fillet_radius"]
-    rf_r = fp["rear_fillet_radius"]
-    root_f = fp["rim_to_flange_fillet_radius_front"]
-    root_r = fp["rim_to_flange_fillet_radius_rear"]
+    h_f = fp["front_flange_radial_height"]   # front step height
+    land_f = fp["front_flange_axial_length"]  # front step land (measured from x_front)
+    sh_f = fp["front_shoulder_offset"]        # front shoulder blend extent
+    rf_f = fp["front_fillet_radius"]          # front outer corner fillet
+    root_f = fp["rim_to_flange_fillet_radius_front"]  # front shoulder blend fillet
 
-    x_step_front_end = x_front + land_f
-    x_root_front_end = x_step_front_end + sh_f
-    x_step_rear_start = x_rear - land_r
-    x_root_rear_start = x_step_rear_start - sh_r
+    h_r = fp["rear_flange_radial_height"]    # rear platform height
+    land_r = fp["rear_flange_axial_length"]  # rear platform land length
+    sh_r = fp["rear_shoulder_offset"]        # rear platform root extent
+    rf_r = fp["rear_fillet_radius"]          # rear platform outer corner fillet
+    root_r = fp["rim_to_flange_fillet_radius_rear"]  # rear platform root fillet
+
+    gd = fp["front_groove_depth"]    # groove radial depth
+    gw = fp["front_groove_width"]    # groove axial width
+    gp = fp["front_groove_pos"]      # gap from corner fillet end to groove entry start
+    gr = fp["front_groove_radius"]   # groove entry/root fillet radius
+
+    # --- Key x positions ---------------------------------------------------
+    x_land_start = x_front + rf_f          # start of front horizontal land
+    x_groove_entry = x_land_start + gp     # x where groove entry fillet begins
+    x_groove_floor_start = x_groove_entry + gr
+    x_groove_floor_end = x_groove_entry + gw - gr
+    x_groove_exit = x_groove_entry + gw    # x where land resumes after groove
+    x_step_front_end = x_front + land_f    # end of front land / start of shoulder
+    x_root_front_end = x_step_front_end + sh_f  # end of front shoulder = rim core start
+
+    x_root_rear_start = x_rear - sh_r - land_r  # start of rear platform root shoulder
+    x_platform_land_start = x_rear - land_r     # start of rear platform land
+    x_platform_corner_start = x_rear - rf_r     # start of outer corner fillet
+
     x_core_start = x_root_front_end
     x_core_end = x_root_rear_start
 
     if x_core_end <= x_core_start:
-        raise ValueError("Invalid stepped-rim geometry: front and rear features overlap")
+        raise ValueError("Invalid blade-platform geometry: front groove/step and rear platform overlap")
+    if x_groove_exit >= x_step_front_end - 1e-6:
+        raise ValueError("Invalid blade-platform geometry: front relief groove exceeds front land")
 
     sz = SUBZONE_NAME_TO_ID
     segs: List[Tuple[np.ndarray, int]] = []
+    n_arc = max(8, n_per_seg // 2)
+    n_line = max(5, n_per_seg // 2)
+    n_groove = max(6, n_per_seg // 2)
 
-    segs.append((_line_points(x_front, r5, x_front, r5 + h_f - rf_f, max(5, n_per_seg // 2)), sz["front_step"]))
-    segs.append((_arc_points(x_front + rf_f, r5 + h_f - rf_f, rf_f, 180.0, 90.0, max(8, n_per_seg // 2)), sz["front_step"]))
-    segs.append((_line_points(x_front + rf_f, r5 + h_f, x_step_front_end, r5 + h_f, max(10, n_per_seg)), sz["front_step"]))
-    segs.append((_arc_points(x_step_front_end, r5 + h_f - root_f, root_f, 90.0, 0.0, max(8, n_per_seg // 2)), sz["front_shoulder"]))
+    # --- Front face (vertical rise) ---
+    segs.append((_line_points(x_front, r5, x_front, r5 + h_f - rf_f, n_line), sz["front_step"]))
+
+    # --- Front outer corner fillet: 180 deg (on face) -> 90 deg (on land) ---
+    segs.append((_arc_points(x_front + rf_f, r5 + h_f - rf_f, rf_f, 180.0, 90.0, n_arc), sz["front_step"]))
+
+    # --- Front land: corner fillet end -> groove entry ---
+    if x_groove_entry > x_land_start + 1e-6:
+        segs.append((_line_points(x_land_start, r5 + h_f, x_groove_entry, r5 + h_f, n_line), sz["front_step"]))
+
+    # --- Groove entry fillet: tangent to land at (x_groove_entry, r5+h_f),
+    # curving down-and-right to the top of the left sidewall at
+    # (x_groove_floor_start, r5+h_f-gr).  Center = (x_groove_entry, r5+h_f-gr),
+    # sweep 90 deg (on land) -> 0 deg (top of sidewall).
+    segs.append((_arc_points(x_groove_entry, r5 + h_f - gr, gr, 90.0, 0.0, n_groove), sz["front_groove"]))
+
+    floor_r = r5 + h_f - gd
+    # --- Left groove sidewall (only if the floor sits below the fillet root) ---
+    if gd > gr + 1e-6:
+        segs.append((_line_points(x_groove_floor_start, r5 + h_f - gr, x_groove_floor_start, floor_r, n_groove), sz["front_groove"]))
+
+    # --- Groove floor ---
+    if x_groove_floor_end > x_groove_floor_start + 1e-6:
+        segs.append((_line_points(x_groove_floor_start, floor_r, x_groove_floor_end, floor_r, n_groove), sz["front_groove"]))
+
+    # --- Right groove sidewall ---
+    if gd > gr + 1e-6:
+        segs.append((_line_points(x_groove_floor_end, floor_r, x_groove_floor_end, r5 + h_f - gr, n_groove), sz["front_groove"]))
+
+    # --- Groove exit fillet: tangent to top of right sidewall at
+    # (x_groove_floor_end, r5+h_f-gr), curving up-and-right back to land at
+    # (x_groove_exit, r5+h_f).  Center = (x_groove_exit, r5+h_f-gr),
+    # sweep 180 deg (top of sidewall) -> 90 deg (on land).
+    segs.append((_arc_points(x_groove_exit, r5 + h_f - gr, gr, 180.0, 90.0, n_groove), sz["front_groove"]))
+
+    # --- Front land: groove exit -> front shoulder start ---
+    if x_step_front_end > x_groove_exit + 1e-6:
+        segs.append((_line_points(x_groove_exit, r5 + h_f, x_step_front_end, r5 + h_f, n_line), sz["front_step"]))
+
+    # --- Front shoulder descent: blend from r5+h_f back down to r5 ---
+    segs.append((_arc_points(x_step_front_end, r5 + h_f - root_f, root_f, 90.0, 0.0, n_arc), sz["front_shoulder"]))
     segs.append((_line_points(x_step_front_end + root_f, r5 + h_f - root_f, x_root_front_end, r5, max(12, n_per_seg)), sz["front_shoulder"]))
 
+    # --- Rim core ---
     segs.append((_line_points(x_core_start, r5, x_core_end, r5, max(18, 2 * n_per_seg)), sz["rim_main"]))
 
-    segs.append((_line_points(x_root_rear_start, r5, x_step_rear_start - root_r, r5 + h_r - root_r, max(12, n_per_seg)), sz["rear_shoulder"]))
-    segs.append((_arc_points(x_step_rear_start, r5 + h_r - root_r, root_r, 180.0, 90.0, max(8, n_per_seg // 2)), sz["rear_shoulder"]))
-    segs.append((_line_points(x_step_rear_start, r5 + h_r, x_rear - rf_r, r5 + h_r, max(10, n_per_seg)), sz["rear_step"]))
-    segs.append((_arc_points(x_rear - rf_r, r5 + h_r - rf_r, rf_r, 90.0, 0.0, max(8, n_per_seg // 2)), sz["rear_step"]))
-    segs.append((_line_points(x_rear, r5 + h_r - rf_r, x_rear, r5, max(5, n_per_seg // 2)), sz["rear_step"]))
+    # --- Rear blade-platform collar: root shoulder rise ---
+    segs.append((_line_points(x_root_rear_start, r5, x_platform_land_start - root_r, r5 + h_r - root_r, max(12, n_per_seg)), sz["rear_platform_root"]))
+    segs.append((_arc_points(x_platform_land_start, r5 + h_r - root_r, root_r, 180.0, 90.0, n_arc), sz["rear_platform_root"]))
+
+    # --- Rear platform land ---
+    segs.append((_line_points(x_platform_land_start, r5 + h_r, x_platform_corner_start, r5 + h_r, max(10, n_per_seg)), sz["rear_platform"]))
+
+    # --- Rear platform outer corner fillet ---
+    segs.append((_arc_points(x_platform_corner_start, r5 + h_r - rf_r, rf_r, 90.0, 0.0, n_arc), sz["rear_platform"]))
+
+    # --- Rear platform face (load-transfer boundary) ---
+    segs.append((_line_points(x_rear, r5 + h_r - rf_r, x_rear, r5, n_line), sz["rear_platform"]))
 
     points = np.vstack([s[0] for s in segs]).astype(np.float64)
     subzone = np.concatenate([np.full(s[0].shape[0], s[1], dtype=np.int32) for s in segs])
+
+    r_face_top = r5 + h_r - rf_r
+    r_face_bot = r5
+    r_face_mid = 0.5 * (r_face_top + r_face_bot)
+
     feature_meta = {
-        "front_root": np.array([x_step_front_end + 0.6 * root_f, r5 + h_f - 0.6 * root_f], dtype=np.float64),
-        "front_outer_corner": np.array([x_front + 0.6 * rf_f, r5 + h_f - 0.6 * rf_f], dtype=np.float64),
-        "rear_root": np.array([x_step_rear_start - 0.6 * root_r, r5 + h_r - 0.6 * root_r], dtype=np.float64),
-        "rear_outer_corner": np.array([x_rear - 0.6 * rf_r, r5 + h_r - 0.6 * rf_r], dtype=np.float64),
+        "front_root": np.array([x_step_front_end + 0.5 * root_f, r5 + h_f - 0.5 * root_f], dtype=np.float64),
+        "front_outer_corner": np.array([x_front + 0.5 * rf_f, r5 + h_f - 0.5 * rf_f], dtype=np.float64),
+        "front_groove_entry": np.array([x_groove_entry, r5 + h_f], dtype=np.float64),
+        "front_groove_floor": np.array([0.5 * (x_groove_floor_start + x_groove_floor_end), floor_r], dtype=np.float64),
+        "front_groove_exit": np.array([x_groove_exit, r5 + h_f], dtype=np.float64),
+        "rear_platform_root_pt": np.array([x_root_rear_start + 0.5 * sh_r, r5 + 0.5 * h_r], dtype=np.float64),
+        "rear_platform_land_pt": np.array([0.5 * (x_platform_land_start + x_platform_corner_start), r5 + h_r], dtype=np.float64),
+        "rear_platform_outer_corner": np.array([x_platform_corner_start + 0.5 * rf_r, r5 + h_r - 0.5 * rf_r], dtype=np.float64),
+        "rear_platform_load_face_centroid": np.array([x_rear, r_face_mid], dtype=np.float64),
         "rim_core_reference": np.array([0.5 * (x_core_start + x_core_end), r5], dtype=np.float64),
+        # Legacy landmark keys retained for backward compatibility with existing
+        # consumers (plotting scripts, feature extraction).
         "front_land_end": np.array([x_step_front_end, r5 + h_f], dtype=np.float64),
-        "rear_land_start": np.array([x_step_rear_start, r5 + h_r], dtype=np.float64),
+        "rear_land_start": np.array([x_platform_land_start, r5 + h_r], dtype=np.float64),
+        "rear_root": np.array([x_root_rear_start + 0.5 * sh_r, r5 + 0.5 * h_r], dtype=np.float64),
+        "rear_outer_corner": np.array([x_platform_corner_start + 0.5 * rf_r, r5 + h_r - 0.5 * rf_r], dtype=np.float64),
     }
     return points, subzone, feature_meta
 
@@ -511,6 +631,7 @@ def build_disc_contour(
     subzone_name_list = list({
         "bore", "lower_transition", "web", "upper_transition",
         "rim_main", "front_step", "rear_step", "front_shoulder", "rear_shoulder",
+        "front_groove", "rear_platform", "rear_platform_root",
     })
 
     return ContourData(

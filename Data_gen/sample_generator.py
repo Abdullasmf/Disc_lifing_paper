@@ -20,7 +20,13 @@ from .config import (
 from .features import contour_derivative_features, empty_features, resample_contour_uniform_arc_length
 from .geometry import build_disc_contour, sanitize_flange_parameters, sanitize_geometry_parameters
 from .mesh_ops import assign_zone_and_region_from_radius, generate_mesh
-from .physics import compute_life_raw, compute_phase_equivalent_stresses, compute_stress_max
+from .physics import (
+    OMEGA_REF_RAD_S,
+    blade_equiv_force_n,
+    compute_life_raw,
+    compute_phase_equivalent_stresses,
+    compute_stress_max,
+)
 
 
 EDGE_DUPLICATE_EPS_MM = 1e-8
@@ -337,6 +343,8 @@ def generate_sample(
     out["seed"] = int(seed)
     out["lifing_mode"] = lifing_mode
     out["triangles"] = mesh.triangles.astype(np.int32)
+    out["blade_equiv_force_N"] = float(blade_equiv_force_n(OMEGA_REF_RAD_S))
+    out["blade_equiv_load_description"] = "annular_blade_mass_centrifugal_surrogate_rear_platform_face"
     out["contour_points_mm"] = contour.points.astype(np.float64)
     out["contour_zone_id"] = contour_zone_id.astype(np.int32)
     out["contour_subzone_id"] = contour.subzone_ids.astype(np.int32)

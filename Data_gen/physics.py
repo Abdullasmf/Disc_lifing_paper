@@ -19,6 +19,7 @@ from skfem import (
     BilinearForm,
     ElementTriP2,
     ElementVector,
+    FacetBasis,
     LinearForm,
     MeshTri,
     condense,
@@ -27,6 +28,9 @@ from skfem import (
 from skfem.helpers import grad
 
 from .config import (
+    BLADE_EQUIV_CG_RADIUS_MM,
+    BLADE_EQUIV_MASS_KG,
+    BLADE_EQUIV_NUM_BLADES,
     CYCLE_PHASE_WEIGHTS,
     CYCLE_SPEED_FACTORS,
     UNIFORM_SN_PARAMS,
@@ -45,6 +49,22 @@ DENSITY_KG_M3 = 4430.0     # density [kg/m^3]
 OMEGA_REF_RAD_S = 4000.0   # takeoff rotational speed [rad/s]
 
 EPS = 1e-6
+
+
+def blade_equiv_force_n(omega: float) -> float:
+    """Total blade-equivalent centrifugal force [N] at angular speed *omega*.
+
+    Annular/axisymmetric surrogate for N discrete blades of mass m_blade each,
+    rotating at *omega* with their centre of gravity at radius r_cg:
+
+        F_total = N * m_blade * omega^2 * r_cg
+
+    This load is fixed (same physical basis for every generated sample) and is
+    applied as a boundary traction on the rear platform load-transfer face
+    inside :func:`_assemble_and_solve`.
+    """
+    r_cg_m = BLADE_EQUIV_CG_RADIUS_MM * 1e-3
+    return float(BLADE_EQUIV_NUM_BLADES) * float(BLADE_EQUIV_MASS_KG) * (float(omega) ** 2) * r_cg_m
 
 # Zone names ordered by zone id (0..4) for fast vectorised parameter lookup.
 _ZONE_NAMES_BY_ID = [ZONE_ID_TO_NAME[i] for i in range(len(ZONE_ID_TO_NAME))]
@@ -86,11 +106,29 @@ def _strain_components(u, w):
     return e_xx, e_rr, e_tt, e_xr
 
 
-def _assemble_and_solve(mesh: MeshTri, omega: float):
+def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray | None = None):
     """Assemble and solve the axisymmetric elasticity system at angular speed omega.
 
     Coordinates of ``mesh`` are expected in METRES.  Returns nodal stress
     components (sxx, srr, stt, sxr) in Pa together with the global basis used.
+
+    In addition to the centrifugal body load, a blade-equivalent centrifugal
+    force (see :func:`blade_equiv_force_n`) is applied as a radial traction
+    on the rear platform load-transfer face.  This face is the vertical
+    boundary segment at the maximum-x edge of the rim, spanning from the
+    upper-transition/rim boundary (r4) up through the top of the rear
+    platform collar (r5 + platform height).  The plain rim wall (r4..r5) is
+    geometrically flush (same x) with the platform's own vertical face
+    (r5..r5+h_r-rf_r), so both are included as a single contiguous loaded
+    boundary — applying the traction only above r5 would introduce an
+    artificial traction discontinuity (and an associated spurious stress
+    singularity) right at the r5 junction, since the two segments are
+    perfectly collinear.  Facets are selected using an near-zero delta-x
+    ("vertical") criterion combined with x-proximity to the local x-max,
+    which cleanly excludes the rear platform's horizontal land / outer
+    corner fillet / shoulder facets even though they share similar x values.
+    If *radial_breaks_m* is not supplied the rim/upper-transition boundary is
+    approximated from the mesh's radial extent.
     """
     C = _axisymmetric_C() * 1e6  # MPa -> Pa for a fully SI solve
 
@@ -118,6 +156,64 @@ def _assemble_and_solve(mesh: MeshTri, omega: float):
 
     K = stiffness.assemble(basis)
     f = body_load.assemble(basis)
+
+    # --- Blade-equivalent centrifugal traction on the rear platform face ---
+    f_total = blade_equiv_force_n(omega)  # [N]
+    if radial_breaks_m is not None and len(radial_breaks_m) > 4:
+        r4_m = float(radial_breaks_m[4])
+    else:
+        # Fallback: approximate the rim zone as the outer ~20mm of radial extent.
+        r4_m = float(mesh.p[1].max()) - 0.020
+
+    # Restrict candidate vertices to the rim zone (r >= r4) then take the
+    # local x-max: this is the flush rear wall/platform x position, distinct
+    # from the (generally larger) global mesh x-max at the bore.
+    rim_zone_mask = mesh.p[1] >= r4_m * 0.95
+    if np.any(rim_zone_mask):
+        x_rear_m = float(mesh.p[0, rim_zone_mask].max())
+    else:
+        x_rear_m = float(mesh.p[0].max())
+
+    bf_ids = mesh.boundary_facets()  # indices into mesh.facets columns
+    if bf_ids.size > 0:
+        fv_x = mesh.p[0, mesh.facets[:, bf_ids]]  # (2, n_bf)
+        fv_r = mesh.p[1, mesh.facets[:, bf_ids]]  # (2, n_bf)
+        mid_x = fv_x.mean(axis=0)
+        mid_r = fv_r.mean(axis=0)
+        dx = np.abs(fv_x[0] - fv_x[1])
+        x_tol = 5e-4  # 0.5 mm tolerance in metres
+        vert_tol = 1e-6  # near-zero delta-x => a (near-)vertical facet
+        rear_mask = (
+            (dx < vert_tol)
+            & (mid_x > x_rear_m - x_tol)
+            & (mid_r >= r4_m * 0.95)
+        )
+        rear_facets = bf_ids[rear_mask]
+    else:
+        rear_facets = np.empty(0, dtype=int)
+
+    if rear_facets.size > 0 and f_total > 0.0:
+        fb = FacetBasis(mesh, element, facets=rear_facets)
+
+        # Traction t_r [Pa] such that integral(t_r * 2*pi*r * ds) = f_total,
+        # approximated with the mean radius and total arc length of the face.
+        r_face_mid = float(mid_r[rear_mask].mean())
+        dv = mesh.p[:, mesh.facets[0, rear_facets]] - mesh.p[:, mesh.facets[1, rear_facets]]
+        l_face = float(np.sqrt((dv ** 2).sum(axis=0)).sum())
+        if l_face > 1e-9 and r_face_mid > 1e-9:
+            t_r = f_total / (2.0 * np.pi * r_face_mid * l_face)
+        else:
+            t_r = 0.0
+
+        @LinearForm
+        def blade_traction(v, w):
+            r = w.x[1]
+            vr = v.value[1]
+            return t_r * vr * r
+
+        f = f + blade_traction.assemble(fb)
+    elif f_total > 0.0:
+        logger.warning("Blade-equivalent load requested but no rear platform facets were found; load not applied.")
 
     # BC: fix the single node closest to the bore inner-face midpoint in x only.
     # Bore inner face is the minimum-radius surface; midpoint is at x=0.
@@ -228,7 +324,9 @@ def compute_phase_equivalent_stresses(
         # Solve in SI: convert mesh coordinates mm -> metres.
         mesh_m = MeshTri(mesh_obj.p * 1e-3, mesh_obj.t)
 
-        basis, sxx, srr, stt, sxr = _assemble_and_solve(mesh_m, OMEGA_REF_RAD_S)
+        basis, sxx, srr, stt, sxr = _assemble_and_solve(
+            mesh_m, OMEGA_REF_RAD_S, radial_breaks_m=radial_breaks * 1e-3
+        )
 
         # Stresses come back in Pa -> convert to MPa.
         sxx = sxx * 1e-6
