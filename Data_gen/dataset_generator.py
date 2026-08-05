@@ -143,6 +143,84 @@ def sample_flange_offsets_lhs(
     return out
 
 
+def validate_lhs_spread(num_samples: int = 30, seed: int = 7) -> bool:
+    """Lightweight diagnostic: confirm LHS produces nonzero spread for every
+    active core and flange parameter, with independent front/rear variation.
+
+    Returns True if all checks pass, False otherwise.  Prints a brief report.
+    """
+    print("\n=== LHS spread diagnostic ===")
+
+    core_list = sample_offsets_lhs(
+        num_samples=num_samples,
+        min_offsets=MIN_OFFSET_MM,
+        max_offsets=MAX_OFFSET_MM,
+        seed=seed,
+    )
+    flange_list = sample_flange_offsets_lhs(
+        num_samples=num_samples,
+        min_offsets=MIN_FLANGE_OFFSET_MM,
+        max_offsets=MAX_FLANGE_OFFSET_MM,
+        seed=seed,
+    )
+
+    all_pass = True
+
+    # Core params
+    for k in PUBLIC_GEOMETRY_PARAMETERS:
+        vals = np.array([d[k] for d in core_list])
+        spread = float(vals.max() - vals.min())
+        lo = float(MIN_OFFSET_MM[k])
+        hi = float(MAX_OFFSET_MM[k])
+        expected_range = hi - lo
+        ok = spread > 0.5 * expected_range
+        print(f"  [{'PASS' if ok else 'FAIL'}] core/{k}: spread={spread:.4f} (range={expected_range:.4f})")
+        if not ok:
+            all_pass = False
+
+    # Flange params
+    for k in FLANGE_GEOMETRY_PARAMETERS:
+        vals = np.array([d[k] for d in flange_list])
+        spread = float(vals.max() - vals.min())
+        lo = float(MIN_FLANGE_OFFSET_MM[k])
+        hi = float(MAX_FLANGE_OFFSET_MM[k])
+        expected_range = hi - lo
+        ok = spread > 0.5 * expected_range
+        print(f"  [{'PASS' if ok else 'FAIL'}] flange/{k}: spread={spread:.4f} (range={expected_range:.4f})")
+        if not ok:
+            all_pass = False
+
+    # Independent front/rear variation: front and rear should not be identical
+    fl_vals = {k: np.array([d[k] for d in flange_list]) for k in FLANGE_GEOMETRY_PARAMETERS}
+    front_ax = fl_vals["front_flange_axial_length"]
+    rear_ax = fl_vals["rear_flange_axial_length"]
+    front_h = fl_vals["front_flange_radial_height"]
+    rear_h = fl_vals["rear_flange_radial_height"]
+    ind_ax = float(np.std(front_ax - rear_ax)) > 1e-6
+    ind_h  = float(np.std(front_h  - rear_h))  > 1e-6
+    print(f"  [{'PASS' if ind_ax else 'FAIL'}] Flange axial_length front != rear (std of diff = {np.std(front_ax - rear_ax):.4f})")
+    print(f"  [{'PASS' if ind_h  else 'FAIL'}] Flange radial_height front != rear (std of diff = {np.std(front_h  - rear_h):.4f})")
+    if not (ind_ax and ind_h):
+        all_pass = False
+
+    # Verify flange offsets are actually passed into generate_sample
+    sample0 = core_list[0]
+    fl0 = flange_list[0]
+    fl1 = flange_list[1]
+    from .sample_generator import generate_sample
+    s0 = generate_sample(param_offsets=sample0, representation="edge", seed=0, include_derivatives=False, flange_param_offsets=fl0)
+    s1 = generate_sample(param_offsets=sample0, representation="edge", seed=0, include_derivatives=False, flange_param_offsets=fl1)
+    fp0 = s0["flange_parameters_actual"]
+    fp1 = s1["flange_parameters_actual"]
+    params_differ = any(abs(fp0[k] - fp1[k]) > 1e-9 for k in FLANGE_GEOMETRY_PARAMETERS)
+    print(f"  [{'PASS' if params_differ else 'FAIL'}] Flange params reach geometry.py: sample 0 vs 1 actual values differ")
+    if not params_differ:
+        all_pass = False
+
+    print(f"=== LHS spread: {'ALL PASS' if all_pass else 'SOME FAIL'} ===\n")
+    return all_pass
+
+
 def generate_dataset(
     output_h5_path: Path,
     representation: str,
@@ -256,11 +334,17 @@ def parse_args() -> argparse.Namespace:
                         help="JSON dict of min flange offset bounds for LHS sampling")
     parser.add_argument("--max-flange-offsets-json", type=Path, default=None,
                         help="JSON dict of max flange offset bounds for LHS sampling")
+    parser.add_argument("--validate-lhs", action="store_true",
+                        help="Run LHS spread diagnostic and exit (no dataset generated)")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    if args.validate_lhs:
+        ok = validate_lhs_spread(num_samples=30, seed=args.seed)
+        sys.exit(0 if ok else 1)
 
     flange_list = None
     if args.flange_list_json is not None:

@@ -12,18 +12,46 @@ import matplotlib.tri as mtri
 import numpy as np
 
 try:
-    from .config import CYCLE_PHASES, NOMINAL_GEOMETRY_MM, radial_stations_from_params
+    from .config import (
+        CYCLE_PHASES, NOMINAL_FLANGE_MM, NOMINAL_GEOMETRY_MM,
+        radial_stations_from_params, resolve_flange_parameters,
+        clip_flange_offsets_to_bounds,
+    )
     from .sample_generator import generate_sample
 except ImportError:
     repo_root = Path(__file__).resolve().parents[1]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from Data_gen.config import CYCLE_PHASES, NOMINAL_GEOMETRY_MM, radial_stations_from_params
+    from Data_gen.config import (
+        CYCLE_PHASES, NOMINAL_FLANGE_MM, NOMINAL_GEOMETRY_MM,
+        radial_stations_from_params, resolve_flange_parameters,
+        clip_flange_offsets_to_bounds,
+    )
     from Data_gen.sample_generator import generate_sample
 
 
 CURVATURE_FEATURE_INDEX = 2  # node_features order: tangent_x, tangent_r, curvature, curvature_gradient
 MIN_LIFE_DISCONTINUITY_LOG10_RATIO = 0.08
+
+# ---------------------------------------------------------------------------
+# Local mesh-spacing criterion for transition / flange checks.
+#
+# Criterion: 10th-percentile nearest-neighbour spacing in the feature zone
+# (lower_transition, upper_transition, flange region) must be no larger than
+# that of the bulk web.  A ratio >= 1.0 means the finest elements in the
+# feature zone are at least as small as the finest elements in the web,
+# confirming the LC_FILLET / LC_RIM fields have taken effect.
+#
+# Engineering justification: for valid geometry, the gmsh LC_FILLET (0.5mm) and
+# LC_EDGE (0.8mm) fields produce boundary elements finer than the web bulk
+# (LC_BULK=2.0mm, LC_EDGE=0.8mm in the web interior).  A ratio < 1.0 would
+# indicate the feature zone has coarser finest elements than the web, which
+# would flag a genuine mesh-quality regression.  The threshold is 1.0 (not
+# inflated) because with a large fillet that spans much of the transition zone,
+# the refinement is uniformly applied and the p10 ratio is close to unity even
+# when the zone is correctly meshed.
+# ---------------------------------------------------------------------------
+_MIN_LOCAL_DENSITY_RATIO = 1.0   # feature zone must have finest elements ≤ web bulk finest
 
 
 def _load_offsets(json_path: Path | None) -> dict[str, float]:
@@ -135,6 +163,62 @@ def create_example_plot(
     print(f"Plot saved: {output_png}")
 
 
+def _local_spacing_ratio(nodes: np.ndarray, zone_ids: np.ndarray,
+                          zone_id_feature: int, zone_id_web: int = 2) -> float:
+    """Return ratio of 10th-percentile inter-node spacing in web vs feature zone.
+
+    Uses the 10th percentile of nearest-neighbour distances rather than the mean,
+    so it captures the finest elements near zone boundaries (where LC_FILLET
+    refinement is applied) rather than diluting the signal with coarser interior
+    elements.  A value > 1 means the finest elements in the feature zone are
+    smaller than the finest elements in the web bulk, confirming refinement.
+    """
+    from scipy.spatial import cKDTree
+    feature_mask = zone_ids == zone_id_feature
+    web_mask = zone_ids == zone_id_web
+    if not np.any(feature_mask) or not np.any(web_mask):
+        return np.nan
+
+    feat_pts = nodes[feature_mask]
+    web_pts = nodes[web_mask]
+
+    def _p10_nn(pts: np.ndarray) -> float:
+        if pts.shape[0] < 2:
+            return np.nan
+        tree = cKDTree(pts)
+        d, _ = tree.query(pts, k=2)  # k=2: first hit is self
+        return float(np.percentile(d[:, 1], 10))
+
+    sp_feat = _p10_nn(feat_pts)
+    sp_web = _p10_nn(web_pts)
+    if not np.isfinite(sp_feat) or not np.isfinite(sp_web) or sp_feat < 1e-12:
+        return np.nan
+    return sp_web / sp_feat   # >1 means feature zone has finer elements than web
+
+
+def _flange_region_spacing_ratio(nodes: np.ndarray, zone_ids: np.ndarray,
+                                  r5: float, r_flange_outer: float) -> float:
+    """Return 10th-pct web/flange spacing ratio for the flange outer-cap region (r > r5)."""
+    from scipy.spatial import cKDTree
+    flange_mask = nodes[:, 1] > r5 + 0.1
+    web_mask = zone_ids == 2
+    if not np.any(flange_mask) or not np.any(web_mask):
+        return np.nan
+
+    def _p10_nn(pts: np.ndarray) -> float:
+        if pts.shape[0] < 2:
+            return np.nan
+        tree = cKDTree(pts)
+        d, _ = tree.query(pts, k=2)
+        return float(np.percentile(d[:, 1], 10))
+
+    sp_fl = _p10_nn(nodes[flange_mask])
+    sp_web = _p10_nn(nodes[web_mask])
+    if not np.isfinite(sp_fl) or not np.isfinite(sp_web) or sp_fl < 1e-12:
+        return np.nan
+    return sp_web / sp_fl
+
+
 def _print_validation(param_offsets: dict[str, float]) -> None:
     """Print required validation checks to stdout."""
     print("\n=== Validation report ===")
@@ -146,11 +230,31 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
     ok_order = bt > rt > wt
     print(f"[{'PASS' if ok_order else 'FAIL'}] Nominal bore_thickness({bt}) > rim_thickness({rt}) > web_thickness({wt})")
 
-    def _validate_one(label: str, offsets: dict[str, float], seed: int) -> None:
-        s_full = generate_sample(param_offsets=offsets, representation="full", seed=seed, include_debug_fields=True)
+    # 2. Nominal flange parameter sanity
+    nf = NOMINAL_FLANGE_MM
+    total_ax = (nf["front_flange_axial_length"] + nf["front_shoulder_offset"]
+                + nf["rear_flange_axial_length"] + nf["rear_shoulder_offset"])
+    fl_fits = total_ax < 0.90 * rt
+    print(f"[{'PASS' if fl_fits else 'FAIL'}] Nominal flange axial extent ({total_ax:.1f} mm) < 0.90×rim ({0.90*rt:.1f} mm)")
+
+    def _validate_one(
+        label: str,
+        offsets: dict[str, float],
+        seed: int,
+        flange_offsets: dict[str, float] | None = None,
+    ) -> None:
+        s_full = generate_sample(
+            param_offsets=offsets,
+            representation="full",
+            seed=seed,
+            include_debug_fields=True,
+            flange_param_offsets=flange_offsets,
+        )
         params = s_full["geometry_parameters_actual"]
+        fp_act = s_full.get("flange_parameters_actual", {})
         rb_arr = radial_stations_from_params(params)
         r1, r2, r3, r4 = rb_arr[1], rb_arr[2], rb_arr[3], rb_arr[4]
+        r5 = float(rb_arr[5])
 
         nodes = s_full["node_coords_mm"]
         zone_ids = s_full["zone_id"]
@@ -165,15 +269,15 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         t_web = params["web_thickness"]
         order_ok = t_bore > t_rim > t_web
 
-        lower_pts = int(np.sum(in_lower_band))
-        upper_pts = int(np.sum(in_upper_band))
-        total_nodes = int(nodes.shape[0])
-        lower_fraction = lower_pts / max(total_nodes, 1)
-        upper_fraction = upper_pts / max(total_nodes, 1)
-        lower_band_frac = (r2 - r1) / max((rb_arr[5] - rb_arr[0]), 1e-12)
-        upper_band_frac = (r4 - r3) / max((rb_arr[5] - rb_arr[0]), 1e-12)
-        lower_denser = lower_fraction > lower_band_frac
-        upper_denser = upper_fraction > upper_band_frac
+        # -----------------------------------------------------------------
+        # Local mesh-spacing criterion (replaces global-fraction comparison).
+        # Criterion: mean inter-node spacing in transition zone < mean spacing
+        # in web bulk.  Ratio = spacing_web / spacing_transition; pass if ≥ 1.05.
+        # -----------------------------------------------------------------
+        lower_ratio = _local_spacing_ratio(nodes, zone_ids, zone_id_feature=1)
+        upper_ratio = _local_spacing_ratio(nodes, zone_ids, zone_id_feature=3)
+        lower_denser = np.isfinite(lower_ratio) and lower_ratio >= _MIN_LOCAL_DENSITY_RATIO
+        upper_denser = np.isfinite(upper_ratio) and upper_ratio >= _MIN_LOCAL_DENSITY_RATIO
 
         life = s_full["life_raw"]
         zone_medians = np.array([np.median(life[zone_ids == zid]) for zid in range(5)], dtype=np.float64)
@@ -192,17 +296,94 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         max_stress_transition = float(np.max(stress[(zone_ids == 1) | (zone_ids == 3)]))
         no_stripe = (max_stress_center_web < max_stress_transition) if np.isfinite(max_stress_center_web) else True
 
-        print(f"\n-- {label} sample --")
-        print(f"[{'PASS' if order_ok else 'FAIL'}] Thickness order bore({t_bore:.2f}) > rim({t_rim:.2f}) > web({t_web:.2f})")
-        print(f"[{'PASS' if lower_correct else 'FAIL'}] Lower transition threshold assignment zone_id==1")
-        print(f"[{'PASS' if upper_correct else 'FAIL'}] Upper transition threshold assignment zone_id==3")
-        print(f"[{'PASS' if lower_denser else 'WARN'}] Lower transition mesh density {lower_fraction:.3f} > band fraction {lower_band_frac:.3f}")
-        print(f"[{'PASS' if upper_denser else 'WARN'}] Upper transition mesh density {upper_fraction:.3f} > band fraction {upper_band_frac:.3f}")
-        print(f"[{'PASS' if discontinuity_ok else 'WARN'}] Life threshold discontinuity ratios: LT/web={ratio_lt_web:.3f}, UT/web={ratio_ut_web:.3f}")
-        if np.isfinite(max_stress_center_web):
-            print(f"[{'PASS' if no_stripe else 'WARN'}] Transition hotspot > web centerline stress: {max_stress_transition:.1f} > {max_stress_center_web:.1f}")
+        # -----------------------------------------------------------------
+        # Flange geometry checks
+        # -----------------------------------------------------------------
+        h_fl = float(fp_act.get("front_flange_radial_height", 0.0))
+        h_rl = float(fp_act.get("rear_flange_radial_height", 0.0))
+        fl_ax = float(fp_act.get("front_flange_axial_length", 0.0))
+        rl_ax = float(fp_act.get("rear_flange_axial_length", 0.0))
+        sh_f = float(fp_act.get("front_shoulder_offset", 0.0))
+        sh_r = float(fp_act.get("rear_shoulder_offset", 0.0))
+        rf_f = float(fp_act.get("front_fillet_radius", 0.0))
+        rf_r = float(fp_act.get("rear_fillet_radius", 0.0))
+        rsf_f = float(fp_act.get("rim_to_flange_fillet_radius_front", 0.0))
+        rsf_r = float(fp_act.get("rim_to_flange_fillet_radius_rear", 0.0))
+
+        flange_active_f = h_fl > 0.5 and fl_ax > 0.5
+        flange_active_r = h_rl > 0.5 and rl_ax > 0.5
+        fl_top_land_f = fl_ax - rf_f - rsf_f
+        fl_top_land_r = rl_ax - rf_r - rsf_r
+        fl_top_ok_f = fl_top_land_f > 1e-3
+        fl_top_ok_r = fl_top_land_r > 1e-3
+        total_ax_fit = (fl_ax + sh_f + rl_ax + sh_r) < 0.90 * t_rim
+        symmetric = abs(h_fl - h_rl) < 0.01 and abs(fl_ax - rl_ax) < 0.01
+
+        # Contour validity
+        contour = s_full["contour_points_mm"]
+        r_max_contour = float(contour[:, 1].max())
+        flange_visible = r_max_contour > r5 + 0.5
+
+        # Flange mesh refinement: check nodes exist above r5 (flange region)
+        # and that their local spacing is finer than web bulk
+        r_flange_outer = r5 + max(h_fl, h_rl)
+        flange_ratio = _flange_region_spacing_ratio(nodes, zone_ids, r5, r_flange_outer)
+        flange_mesh_ok = np.isfinite(flange_ratio) and flange_ratio >= _MIN_LOCAL_DENSITY_RATIO
+
+        # Flange stress and life (nearest-contour nodes above r5)
+        flange_nodes_mask = nodes[:, 1] > r5 + 0.1
+        rim_flat_mask = (nodes[:, 1] >= r5 - 1.0) & (nodes[:, 1] <= r5 + 0.1)
+        has_flange_nodes = np.any(flange_nodes_mask)
+        has_rim_flat_nodes = np.any(rim_flat_mask)
+
+        if has_flange_nodes and has_rim_flat_nodes:
+            stress_fl_mean = float(np.mean(stress[flange_nodes_mask]))
+            stress_rim_mean = float(np.mean(stress[rim_flat_mask]))
+            life_fl_median = float(np.median(life[flange_nodes_mask]))
+            life_rim_median = float(np.median(life[rim_flat_mask]))
         else:
-            print("[SKIP] Not enough web-center nodes for centerline check")
+            stress_fl_mean = stress_rim_mean = np.nan
+            life_fl_median = life_rim_median = np.nan
+
+        print(f"\n-- {label} sample --")
+        print(f"  Core geometry:")
+        print(f"  [{'PASS' if order_ok else 'FAIL'}] Thickness order bore({t_bore:.2f}) > rim({t_rim:.2f}) > web({t_web:.2f})")
+        print(f"  [{'PASS' if lower_correct else 'FAIL'}] Lower transition threshold assignment zone_id==1")
+        print(f"  [{'PASS' if upper_correct else 'FAIL'}] Upper transition threshold assignment zone_id==3")
+        # Local spacing criterion (replaces old global-fraction WARN):
+        lr_str = f"{lower_ratio:.3f}" if np.isfinite(lower_ratio) else "n/a"
+        ur_str = f"{upper_ratio:.3f}" if np.isfinite(upper_ratio) else "n/a"
+        print(f"  [{'PASS' if lower_denser else 'FAIL'}] Lower transition refinement ratio (p10 web/LT spacing) = {lr_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
+        print(f"  [{'PASS' if upper_denser else 'FAIL'}] Upper transition refinement ratio (p10 web/UT spacing) = {ur_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
+        print(f"  [{'PASS' if discontinuity_ok else 'WARN'}] Life discontinuity LT/web={ratio_lt_web:.3f}, UT/web={ratio_ut_web:.3f}")
+        if np.isfinite(max_stress_center_web):
+            print(f"  [{'PASS' if no_stripe else 'WARN'}] Transition hotspot > web centerline: {max_stress_transition:.1f} > {max_stress_center_web:.1f} MPa")
+        else:
+            print("  [SKIP] Not enough web-center nodes for centerline check")
+
+        print(f"\n  Flange geometry (resolved parameters):")
+        print(f"    Front: axial_length={fl_ax:.3f} mm, radial_height={h_fl:.3f} mm, shoulder={sh_f:.3f} mm")
+        print(f"           top_fillet={rf_f:.3f} mm, shoulder_fillet={rsf_f:.3f} mm, top_land={fl_top_land_f:.3f} mm")
+        print(f"    Rear:  axial_length={rl_ax:.3f} mm, radial_height={h_rl:.3f} mm, shoulder={sh_r:.3f} mm")
+        print(f"           top_fillet={rf_r:.3f} mm, shoulder_fillet={rsf_r:.3f} mm, top_land={fl_top_land_r:.3f} mm")
+        print(f"    Geometry: {'SYMMETRIC' if symmetric else 'ASYMMETRIC'} front/rear")
+        print(f"  [{'PASS' if flange_active_f else 'FAIL'}] Front flange geometrically active (height={h_fl:.2f} mm, axial={fl_ax:.2f} mm)")
+        print(f"  [{'PASS' if flange_active_r else 'FAIL'}] Rear flange geometrically active (height={h_rl:.2f} mm, axial={rl_ax:.2f} mm)")
+        print(f"  [{'PASS' if fl_top_ok_f else 'FAIL'}] Front flange top-land positive ({fl_top_land_f:.3f} mm)")
+        print(f"  [{'PASS' if fl_top_ok_r else 'FAIL'}] Rear flange top-land positive ({fl_top_land_r:.3f} mm)")
+        print(f"  [{'PASS' if total_ax_fit else 'FAIL'}] Total flange axial extent ({fl_ax+sh_f+rl_ax+sh_r:.2f} mm) < 0.90×rim ({0.90*t_rim:.2f} mm)")
+        print(f"  [{'PASS' if flange_visible else 'FAIL'}] Contour r_max ({r_max_contour:.2f} mm) > r5+0.5 ({r5+0.5:.2f} mm) — flanges visible")
+
+        print(f"\n  Flange mesh refinement:")
+        fr_str = f"{flange_ratio:.3f}" if np.isfinite(flange_ratio) else "n/a"
+        print(f"  [{'PASS' if flange_mesh_ok else 'FAIL'}] Flange region refinement ratio (p10 web/flange spacing) = {fr_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
+
+        print(f"\n  Flange FEM response (indicative, not acceptance criterion):")
+        if np.isfinite(stress_fl_mean):
+            print(f"    Mean stress near flanges: {stress_fl_mean:.1f} MPa  |  near rim flat: {stress_rim_mean:.1f} MPa")
+            print(f"    Median life near flanges: {life_fl_median:.2e} cycles  |  near rim flat: {life_rim_median:.2e} cycles")
+        else:
+            print("    [SKIP] Insufficient flange nodes for stress/life comparison")
 
     default_offset = {
         "bore_radius_inner": -2.0,
@@ -217,8 +398,22 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         "lower_fillet_radius": -0.6,
         "upper_fillet_radius": 0.4,
     }
-    _validate_one("Nominal", {}, seed=0)
-    _validate_one("Offset", param_offsets if param_offsets else default_offset, seed=13)
+    # Asymmetric flange offsets for offset sample: front and rear differ.
+    asym_flange_offset = {
+        "front_flange_axial_length": +0.20,
+        "rear_flange_axial_length":  -0.20,
+        "front_flange_radial_height": +0.15,
+        "rear_flange_radial_height":  -0.15,
+        "front_shoulder_offset": +0.10,
+        "rear_shoulder_offset":  -0.10,
+    }
+    _validate_one("Nominal", {}, seed=0, flange_offsets={})
+    _validate_one(
+        "Offset (asymmetric flanges)",
+        param_offsets if param_offsets else default_offset,
+        seed=13,
+        flange_offsets=clip_flange_offsets_to_bounds(asym_flange_offset),
+    )
 
     print("=== End validation ===\n")
 

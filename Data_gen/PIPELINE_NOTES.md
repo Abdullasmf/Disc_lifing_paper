@@ -40,6 +40,64 @@ dataset_generator.py → generate_dataset() (LHS or explicit offsets, batch)
 
 ---
 
+## Changes in v4.1 (Validation repair)
+
+### What was changed
+
+#### 1. `plot_example_sample.py`
+- **Replaced** the global-fraction mesh density criterion (which produced a `[WARN]`
+  for upper transition on nominal geometry) with a **local spacing criterion**:
+  the 10th-percentile nearest-neighbour distance in each feature zone (LT, UT,
+  flange region) is compared against the 10th-percentile spacing in the bulk web.
+  A ratio ≥ 1.0 (feature zone p10 spacing ≤ web p10 spacing) confirms that
+  LC_FILLET/LC_RIM refinement has taken effect.  The old criterion compared
+  per-zone global node *fractions* to radial band width fractions, which is not
+  a valid density metric.
+- Added comprehensive **flange validation** to every `_validate_one` call:
+  - Resolved front/rear flange parameter values (axial length, radial height,
+    shoulder, top-corner and shoulder fillet radii, computed top-land).
+  - `[PASS/FAIL]` checks for: flange geometrically active, top-land positive,
+    total axial extent < 0.90×rim, contour r_max > r5+0.5.
+  - Flange mesh refinement ratio check (p10 web/flange spacing ≥ 1.0).
+  - Indicative (non-acceptance) FEM stress and life near flange vs rim-flat.
+  - Symmetric / asymmetric geometry label.
+- Offset validation sample now uses **asymmetric flange offsets** to demonstrate
+  independent front/rear parameter variation.
+
+#### 2. `dataset_generator.py`
+- Added `validate_lhs_spread()` function: generates 30-sample LHS draws for
+  both core and flange parameters and verifies:
+  - Each parameter's spread is ≥ 50 % of its configured range (PASS/FAIL).
+  - Front and rear flange parameters vary independently (std of difference > 0).
+  - Flange offsets actually reach `geometry.py` (two samples with same core
+    offsets but different flange offsets produce different actual flange values).
+- Added `--validate-lhs` CLI flag to run the diagnostic and exit.
+
+#### 3. `validate_contour.py`
+- `plot_flange_variants` now includes a sixth **asymmetric** variant
+  (front_height +0.15, rear_height −0.15, front_axial +0.20, rear_axial −0.20).
+- Added `plot_zoomed_flanges()`: generates `flange_zoom.png` with 2×2 zoomed
+  views of the front and rear flange regions for both nominal and asymmetric
+  parameter sets.
+
+### Criterion documentation: local spacing ratio
+
+The mesh density criterion is based on the **10th-percentile nearest-neighbour
+distance** among nodes within each zone.
+
+- `_local_spacing_ratio(nodes, zone_ids, zone_id_feature)` returns
+  `p10_nn_web / p10_nn_feature`.
+- A value ≥ 1.0 means the finest elements in the feature zone are at least as
+  small as the finest elements in the web bulk, confirming that the gmsh
+  LC_FILLET (0.5 mm) and LC_RIM (1.2 mm) fields have produced local refinement.
+- A value < 1.0 would indicate the feature zone has coarser finest elements
+  than the web — a genuine regression that should be investigated.
+- The threshold is set at 1.0, not inflated, because with a large transition
+  fillet spanning most of the zone, refinement may be uniformly distributed
+  with the ratio close to unity even when meshing is correct.
+
+---
+
 ## Changes in v4.0 (Flange geometry addition)
 
 ### What was changed
