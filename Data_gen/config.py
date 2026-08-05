@@ -101,8 +101,8 @@ SUBZONE_NAME_TO_ID: Dict[str, int] = {
     "web":                2,
     "upper_transition":   3,
     "rim_main":           4,   # main outer cap at r = r5
-    "front_flange":       5,   # front flange face + top
-    "rear_flange":        6,   # rear flange face + top
+    "front_step":       5,   # front flange face + top
+    "rear_step":        6,   # rear flange face + top
     "front_shoulder":     7,   # shoulder transition (front flange → main cap)
     "rear_shoulder":      8,   # shoulder transition (main cap → rear flange)
 }

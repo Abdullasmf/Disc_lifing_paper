@@ -34,10 +34,10 @@ CURVATURE_FEATURE_INDEX = 2  # node_features order: tangent_x, tangent_r, curvat
 MIN_LIFE_DISCONTINUITY_LOG10_RATIO = 0.08
 
 # ---------------------------------------------------------------------------
-# Local mesh-spacing criterion for transition / flange checks.
+# Local mesh-spacing criterion for transition / step checks.
 #
 # Criterion: 10th-percentile nearest-neighbour spacing in the feature zone
-# (lower_transition, upper_transition, flange region) must be no larger than
+# (lower_transition, upper_transition, step region) must be no larger than
 # that of the bulk web.  A ratio >= 1.0 means the finest elements in the
 # feature zone are at least as small as the finest elements in the web,
 # confirming the LC_FILLET / LC_RIM fields have taken effect.
@@ -196,13 +196,13 @@ def _local_spacing_ratio(nodes: np.ndarray, zone_ids: np.ndarray,
     return sp_web / sp_feat   # >1 means feature zone has finer elements than web
 
 
-def _flange_region_spacing_ratio(nodes: np.ndarray, zone_ids: np.ndarray,
-                                  r5: float, r_flange_outer: float) -> float:
-    """Return 10th-pct web/flange spacing ratio for the flange outer-cap region (r > r5)."""
+def _step_region_spacing_ratio(nodes: np.ndarray, zone_ids: np.ndarray,
+                                  r5: float, r_step_outer: float) -> float:
+    """Return 10th-pct web/step spacing ratio for the step outer-cap region (r > r5)."""
     from scipy.spatial import cKDTree
-    flange_mask = nodes[:, 1] > r5 + 0.1
+    step_mask = nodes[:, 1] > r5 + 0.1
     web_mask = zone_ids == 2
-    if not np.any(flange_mask) or not np.any(web_mask):
+    if not np.any(step_mask) or not np.any(web_mask):
         return np.nan
 
     def _p10_nn(pts: np.ndarray) -> float:
@@ -212,7 +212,7 @@ def _flange_region_spacing_ratio(nodes: np.ndarray, zone_ids: np.ndarray,
         d, _ = tree.query(pts, k=2)
         return float(np.percentile(d[:, 1], 10))
 
-    sp_fl = _p10_nn(nodes[flange_mask])
+    sp_fl = _p10_nn(nodes[step_mask])
     sp_web = _p10_nn(nodes[web_mask])
     if not np.isfinite(sp_fl) or not np.isfinite(sp_web) or sp_fl < 1e-12:
         return np.nan
@@ -230,12 +230,12 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
     ok_order = bt > rt > wt
     print(f"[{'PASS' if ok_order else 'FAIL'}] Nominal bore_thickness({bt}) > rim_thickness({rt}) > web_thickness({wt})")
 
-    # 2. Nominal flange parameter sanity
+    # 2. Nominal step parameter sanity
     nf = NOMINAL_FLANGE_MM
     total_ax = (nf["front_flange_axial_length"] + nf["front_shoulder_offset"]
                 + nf["rear_flange_axial_length"] + nf["rear_shoulder_offset"])
     fl_fits = total_ax < 0.90 * rt
-    print(f"[{'PASS' if fl_fits else 'FAIL'}] Nominal flange axial extent ({total_ax:.1f} mm) < 0.90×rim ({0.90*rt:.1f} mm)")
+    print(f"[{'PASS' if fl_fits else 'FAIL'}] Nominal step axial extent ({total_ax:.1f} mm) < 0.90×rim ({0.90*rt:.1f} mm)")
 
     def _validate_one(
         label: str,
@@ -297,7 +297,7 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         no_stripe = (max_stress_center_web < max_stress_transition) if np.isfinite(max_stress_center_web) else True
 
         # -----------------------------------------------------------------
-        # Flange geometry checks
+        # Stepped rim geometry checks
         # -----------------------------------------------------------------
         h_fl = float(fp_act.get("front_flange_radial_height", 0.0))
         h_rl = float(fp_act.get("rear_flange_radial_height", 0.0))
@@ -307,11 +307,11 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         sh_r = float(fp_act.get("rear_shoulder_offset", 0.0))
         rf_f = float(fp_act.get("front_fillet_radius", 0.0))
         rf_r = float(fp_act.get("rear_fillet_radius", 0.0))
-        rsf_f = float(fp_act.get("rim_to_flange_fillet_radius_front", 0.0))
-        rsf_r = float(fp_act.get("rim_to_flange_fillet_radius_rear", 0.0))
+        rsf_f = float(fp_act.get("rim_to_step_fillet_radius_front", 0.0))
+        rsf_r = float(fp_act.get("rim_to_step_fillet_radius_rear", 0.0))
 
-        flange_active_f = h_fl > 0.5 and fl_ax > 0.5
-        flange_active_r = h_rl > 0.5 and rl_ax > 0.5
+        step_active_f = h_fl > 0.5 and fl_ax > 0.5
+        step_active_r = h_rl > 0.5 and rl_ax > 0.5
         fl_top_land_f = fl_ax - rf_f - rsf_f
         fl_top_land_r = rl_ax - rf_r - rsf_r
         fl_top_ok_f = fl_top_land_f > 1e-3
@@ -322,24 +322,24 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         # Contour validity
         contour = s_full["contour_points_mm"]
         r_max_contour = float(contour[:, 1].max())
-        flange_visible = r_max_contour > r5 + 0.5
+        step_visible = r_max_contour > r5 + 0.5
 
-        # Flange mesh refinement: check nodes exist above r5 (flange region)
+        # Stepped rim mesh refinement: check nodes exist above r5 (step region)
         # and that their local spacing is finer than web bulk
-        r_flange_outer = r5 + max(h_fl, h_rl)
-        flange_ratio = _flange_region_spacing_ratio(nodes, zone_ids, r5, r_flange_outer)
-        flange_mesh_ok = np.isfinite(flange_ratio) and flange_ratio >= _MIN_LOCAL_DENSITY_RATIO
+        r_step_outer = r5 + max(h_fl, h_rl)
+        step_ratio = _step_region_spacing_ratio(nodes, zone_ids, r5, r_step_outer)
+        step_mesh_ok = np.isfinite(step_ratio) and step_ratio >= _MIN_LOCAL_DENSITY_RATIO
 
-        # Flange stress and life (nearest-contour nodes above r5)
-        flange_nodes_mask = nodes[:, 1] > r5 + 0.1
+        # Stepped rim stress and life (nearest-contour nodes above r5)
+        step_nodes_mask = nodes[:, 1] > r5 + 0.1
         rim_flat_mask = (nodes[:, 1] >= r5 - 1.0) & (nodes[:, 1] <= r5 + 0.1)
-        has_flange_nodes = np.any(flange_nodes_mask)
+        has_step_nodes = np.any(step_nodes_mask)
         has_rim_flat_nodes = np.any(rim_flat_mask)
 
-        if has_flange_nodes and has_rim_flat_nodes:
-            stress_fl_mean = float(np.mean(stress[flange_nodes_mask]))
+        if has_step_nodes and has_rim_flat_nodes:
+            stress_fl_mean = float(np.mean(stress[step_nodes_mask]))
             stress_rim_mean = float(np.mean(stress[rim_flat_mask]))
-            life_fl_median = float(np.median(life[flange_nodes_mask]))
+            life_fl_median = float(np.median(life[step_nodes_mask]))
             life_rim_median = float(np.median(life[rim_flat_mask]))
         else:
             stress_fl_mean = stress_rim_mean = np.nan
@@ -361,29 +361,29 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         else:
             print("  [SKIP] Not enough web-center nodes for centerline check")
 
-        print(f"\n  Flange geometry (resolved parameters):")
+        print(f"\n  Stepped rim geometry (resolved parameters):")
         print(f"    Front: axial_length={fl_ax:.3f} mm, radial_height={h_fl:.3f} mm, shoulder={sh_f:.3f} mm")
         print(f"           top_fillet={rf_f:.3f} mm, shoulder_fillet={rsf_f:.3f} mm, top_land={fl_top_land_f:.3f} mm")
         print(f"    Rear:  axial_length={rl_ax:.3f} mm, radial_height={h_rl:.3f} mm, shoulder={sh_r:.3f} mm")
         print(f"           top_fillet={rf_r:.3f} mm, shoulder_fillet={rsf_r:.3f} mm, top_land={fl_top_land_r:.3f} mm")
         print(f"    Geometry: {'SYMMETRIC' if symmetric else 'ASYMMETRIC'} front/rear")
-        print(f"  [{'PASS' if flange_active_f else 'FAIL'}] Front flange geometrically active (height={h_fl:.2f} mm, axial={fl_ax:.2f} mm)")
-        print(f"  [{'PASS' if flange_active_r else 'FAIL'}] Rear flange geometrically active (height={h_rl:.2f} mm, axial={rl_ax:.2f} mm)")
-        print(f"  [{'PASS' if fl_top_ok_f else 'FAIL'}] Front flange top-land positive ({fl_top_land_f:.3f} mm)")
-        print(f"  [{'PASS' if fl_top_ok_r else 'FAIL'}] Rear flange top-land positive ({fl_top_land_r:.3f} mm)")
-        print(f"  [{'PASS' if total_ax_fit else 'FAIL'}] Total flange axial extent ({fl_ax+sh_f+rl_ax+sh_r:.2f} mm) < 0.90×rim ({0.90*t_rim:.2f} mm)")
-        print(f"  [{'PASS' if flange_visible else 'FAIL'}] Contour r_max ({r_max_contour:.2f} mm) > r5+0.5 ({r5+0.5:.2f} mm) — flanges visible")
+        print(f"  [{'PASS' if step_active_f else 'FAIL'}] Front step geometrically active (height={h_fl:.2f} mm, axial={fl_ax:.2f} mm)")
+        print(f"  [{'PASS' if step_active_r else 'FAIL'}] Rear step geometrically active (height={h_rl:.2f} mm, axial={rl_ax:.2f} mm)")
+        print(f"  [{'PASS' if fl_top_ok_f else 'FAIL'}] Front step top-land positive ({fl_top_land_f:.3f} mm)")
+        print(f"  [{'PASS' if fl_top_ok_r else 'FAIL'}] Rear step top-land positive ({fl_top_land_r:.3f} mm)")
+        print(f"  [{'PASS' if total_ax_fit else 'FAIL'}] Total step axial extent ({fl_ax+sh_f+rl_ax+sh_r:.2f} mm) < 0.90×rim ({0.90*t_rim:.2f} mm)")
+        print(f"  [{'PASS' if step_visible else 'FAIL'}] Contour r_max ({r_max_contour:.2f} mm) > r5+0.5 ({r5+0.5:.2f} mm) — steps visible")
 
-        print(f"\n  Flange mesh refinement:")
-        fr_str = f"{flange_ratio:.3f}" if np.isfinite(flange_ratio) else "n/a"
-        print(f"  [{'PASS' if flange_mesh_ok else 'FAIL'}] Flange region refinement ratio (p10 web/flange spacing) = {fr_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
+        print(f"\n  Stepped rim mesh refinement:")
+        fr_str = f"{step_ratio:.3f}" if np.isfinite(step_ratio) else "n/a"
+        print(f"  [{'PASS' if step_mesh_ok else 'FAIL'}] Stepped rim region refinement ratio (p10 web/step spacing) = {fr_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
 
-        print(f"\n  Flange FEM response (indicative, not acceptance criterion):")
+        print(f"\n  Stepped rim FEM response (indicative, not acceptance criterion):")
         if np.isfinite(stress_fl_mean):
-            print(f"    Mean stress near flanges: {stress_fl_mean:.1f} MPa  |  near rim flat: {stress_rim_mean:.1f} MPa")
-            print(f"    Median life near flanges: {life_fl_median:.2e} cycles  |  near rim flat: {life_rim_median:.2e} cycles")
+            print(f"    Mean stress near steps: {stress_fl_mean:.1f} MPa  |  near rim flat: {stress_rim_mean:.1f} MPa")
+            print(f"    Median life near steps: {life_fl_median:.2e} cycles  |  near rim flat: {life_rim_median:.2e} cycles")
         else:
-            print("    [SKIP] Insufficient flange nodes for stress/life comparison")
+            print("    [SKIP] Insufficient step nodes for stress/life comparison")
 
     default_offset = {
         "bore_radius_inner": -2.0,
@@ -398,8 +398,8 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         "lower_fillet_radius": -0.6,
         "upper_fillet_radius": 0.4,
     }
-    # Asymmetric flange offsets for offset sample: front and rear differ.
-    asym_flange_offset = {
+    # Asymmetric step offsets for offset sample: front and rear differ.
+    asym_step_offset = {
         "front_flange_axial_length": +0.20,
         "rear_flange_axial_length":  -0.20,
         "front_flange_radial_height": +0.15,
@@ -409,10 +409,10 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
     }
     _validate_one("Nominal", {}, seed=0, flange_offsets={})
     _validate_one(
-        "Offset (asymmetric flanges)",
+        "Offset (asymmetric steps)",
         param_offsets if param_offsets else default_offset,
         seed=13,
-        flange_offsets=clip_flange_offsets_to_bounds(asym_flange_offset),
+        flange_offsets=clip_flange_offsets_to_bounds(asym_step_offset),
     )
 
     print("=== End validation ===\n")

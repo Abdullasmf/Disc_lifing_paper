@@ -40,9 +40,9 @@ def create_dataset_file(
     h5f = h5py.File(output_h5_path, "w")
 
     h5f.attrs["generator_name"] = "synthetic_axisymmetric_disc_two_layer"
-    h5f.attrs["generator_version"] = "4.0"
+    h5f.attrs["generator_version"] = "4.1"
     h5f.attrs["generator/name"] = "synthetic_axisymmetric_disc_two_layer"
-    h5f.attrs["generator/version"] = "4.0"
+    h5f.attrs["generator/version"] = "4.1"
     h5f.attrs["representation"] = representation
     h5f.attrs["include_derivatives"] = bool(include_derivatives)
     h5f.attrs["units"] = "mm"
@@ -148,6 +148,11 @@ def write_sample_group(h5f: h5py.File, sample_id: int, sample_seed: int, sample:
 
     for key in write_keys:
         sg.create_dataset(key, data=sample[key], compression="gzip")
+
+    if "feature_landmarks_mm" in sample:
+        fg = sg.create_group("feature_landmarks_mm")
+        for key, value in sample["feature_landmarks_mm"].items():
+            fg.create_dataset(key, data=value)
 
 
 def close_file(h5f: h5py.File) -> None:

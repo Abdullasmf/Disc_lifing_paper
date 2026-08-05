@@ -193,21 +193,20 @@ def generate_mesh(
         # 3e. Flange outer face — if flanges are present the contour extends
         #     beyond r5.  Add a second refinement at the flange outer radius to
         #     resolve the shoulder fillet stress concentration.
-        if r_max_contour > r5 + 0.5:   # only when flanges add meaningful radial height
-            flange_pts = [
+        if r_max_contour > r5 + 0.5:
+            rim_feature_pts = [
                 point_tags[i]
-                for i, (_, r) in enumerate(contour_points)
-                if abs(r - r_max_contour) < RIM_INFLUENCE_MM
+                for i, (x, r) in enumerate(contour_points)
+                if (r > r5 + 0.15) or (abs(r - r5) < 0.35 and (abs(x) > 0.20 * (abs(contour_points[:,0]).max() + 1e-9)))
             ]
-            _add_threshold(flange_pts, LC_FILLET, FILLET_INFLUENCE_MM)
+            _add_threshold(rim_feature_pts, LC_FILLET, FILLET_INFLUENCE_MM)
 
-            # Also refine the shoulder region: points at r between r5 and r_max_contour.
-            shoulder_pts = [
+            root_pts = [
                 point_tags[i]
-                for i, (_, r) in enumerate(contour_points)
-                if r5 + 0.2 < r < r_max_contour - 0.2
+                for i, (x, r) in enumerate(contour_points)
+                if (r5 + 0.15 <= r <= r_max_contour - 0.15)
             ]
-            _add_threshold(shoulder_pts, LC_FILLET, FILLET_INFLUENCE_MM * 0.75)
+            _add_threshold(root_pts, LC_FILLET, FILLET_INFLUENCE_MM * 0.9)
 
         if all_threshold_ids:
             if len(all_threshold_ids) > 1:
