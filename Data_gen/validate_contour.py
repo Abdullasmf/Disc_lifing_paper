@@ -215,8 +215,8 @@ def plot_stress_comparison(out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for label, kwargs in [
-        ("no_step",    {"use_steps": False}),
-        ("with_steps", {"use_steps": True, "flange_param_offsets": {}}),
+        ("no_flanges",    {"use_flanges": False}),
+        ("with_flanges", {"use_flanges": True, "flange_param_offsets": {}}),
     ]:
         print(f"  Generating {label} full sample for stress plot...")
         s = generate_sample(

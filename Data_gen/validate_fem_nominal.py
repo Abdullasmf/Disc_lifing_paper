@@ -40,7 +40,7 @@ except ImportError:
 # stable/deterministic at nominal geometry (see validate_fem_nominal run
 # logs); the bound below is calibrated with headroom above that value.
 PEAK_STRESS_MIN_MPA = 300.0
-PEAK_STRESS_MAX_MPA = 8000.0
+PEAK_STRESS_MAX_MPA = 2500.0
 
 
 def main() -> None:

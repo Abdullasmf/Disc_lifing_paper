@@ -257,7 +257,9 @@ MAX_FLANGE_OFFSET_MM: Dict[str, float] = {
 # of the LHS-sampled parameter space.
 # ---------------------------------------------------------------------------
 BLADE_EQUIV_NUM_BLADES: int = 60        # representative blade count
-BLADE_EQUIV_MASS_KG: float = 0.050      # mass per blade [kg]
+BLADE_EQUIV_MASS_KG: float = 0.003      # mass per blade [kg]; 3 g each → ~331 kN total at 4000 rad/s
+#   F = 60 × 0.003 kg × (4000 rad/s)² × 0.115 m ≈ 331 kN ≈ 25 % of rim centrifugal
+#   This is physically modest and adds a visible but non-dominating rim-load contribution.
 BLADE_EQUIV_CG_RADIUS_MM: float = 115.0  # blade CG radius [mm] (outboard of rim)
 
 CYCLE_PHASES = (
