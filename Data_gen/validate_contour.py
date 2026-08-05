@@ -27,11 +27,11 @@ import numpy as np
 try:
     from .config import (
         NOMINAL_GEOMETRY_MM, SUBZONE_NAME_TO_ID, SUBZONE_ID_TO_NAME,
-        resolve_step_parameters, resolve_geometry_parameters,
-        clip_step_offsets_to_bounds,
+        resolve_flange_parameters, resolve_geometry_parameters,
+        clip_flange_offsets_to_bounds,
     )
     from .geometry import (
-        build_disc_contour, sanitize_step_parameters, sanitize_geometry_parameters,
+        build_disc_contour, sanitize_flange_parameters, sanitize_geometry_parameters,
     )
     from .sample_generator import generate_sample
 except ImportError:
@@ -40,11 +40,11 @@ except ImportError:
         sys.path.insert(0, str(repo_root))
     from Data_gen.config import (
         NOMINAL_GEOMETRY_MM, SUBZONE_NAME_TO_ID, SUBZONE_ID_TO_NAME,
-        resolve_step_parameters, resolve_geometry_parameters,
-        clip_step_offsets_to_bounds,
+        resolve_flange_parameters, resolve_geometry_parameters,
+        clip_flange_offsets_to_bounds,
     )
     from Data_gen.geometry import (
-        build_disc_contour, sanitize_step_parameters, sanitize_geometry_parameters,
+        build_disc_contour, sanitize_flange_parameters, sanitize_geometry_parameters,
     )
     from Data_gen.sample_generator import generate_sample
 
@@ -63,10 +63,10 @@ SUBZONE_COLOURS = {
 }
 
 
-def _get_params_and_steps(geo_offsets=None, step_offsets=None):
+def _get_params_and_steps(geo_offsets=None, flange_offsets=None):
     params = sanitize_geometry_parameters(resolve_geometry_parameters(geo_offsets or {}))
-    fp_raw = resolve_step_parameters(step_offsets or {})
-    fp = sanitize_step_parameters(fp_raw, params["rim_thickness"])
+    fp_raw = resolve_flange_parameters(flange_offsets or {})
+    fp = sanitize_flange_parameters(fp_raw, params["rim_thickness"])
     return params, fp
 
 
@@ -74,8 +74,8 @@ def plot_contour_comparison(out_dir: Path) -> None:
     """Figure 1: old (no-step) vs new (stepd) contour overlay."""
     params, fp = _get_params_and_steps()
 
-    contour_old = build_disc_contour(params, step_params=None)
-    contour_new = build_disc_contour(params, step_params=fp)
+    contour_old = build_disc_contour(params, flange_params=None)
+    contour_new = build_disc_contour(params, flange_params=fp)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 7))
 
@@ -132,15 +132,15 @@ def plot_step_variants(out_dir: Path) -> None:
     # Last variant is deliberately asymmetric (front != rear).
     variants = {
         "nominal":              {},
-        "+fl_height+0.2":       {"front_step_radial_height": +0.2, "rear_step_radial_height": +0.2},
-        "-fl_height-0.2":       {"front_step_radial_height": -0.2, "rear_step_radial_height": -0.2},
-        "+fl_axial+0.3":        {"front_step_axial_length": +0.3, "rear_step_axial_length": +0.3},
+        "+fl_height+0.2":       {"front_flange_radial_height": +0.2, "rear_flange_radial_height": +0.2},
+        "-fl_height-0.2":       {"front_flange_radial_height": -0.2, "rear_flange_radial_height": -0.2},
+        "+fl_axial+0.3":        {"front_flange_axial_length": +0.3, "rear_flange_axial_length": +0.3},
         "+fillet+0.1":          {"front_fillet_radius": +0.1, "rear_fillet_radius": +0.1},
         "asymmetric":           {
-            "front_step_radial_height": +0.15,
-            "rear_step_radial_height":  -0.15,
-            "front_step_axial_length":  +0.20,
-            "rear_step_axial_length":   -0.20,
+            "front_flange_radial_height": +0.15,
+            "rear_flange_radial_height":  -0.15,
+            "front_flange_axial_length":  +0.20,
+            "rear_flange_axial_length":   -0.20,
         },
     }
 
@@ -153,11 +153,11 @@ def plot_step_variants(out_dir: Path) -> None:
     colours = ["k", "royalblue", "tomato", "seagreen", "darkorange"]
 
     for ax, (label, offs), colour in zip(axes, variants.items(), colours):
-        fp = sanitize_step_parameters(
-            resolve_step_parameters(clip_step_offsets_to_bounds(offs)),
+        fp = sanitize_flange_parameters(
+            resolve_flange_parameters(clip_flange_offsets_to_bounds(offs)),
             t_rim,
         )
-        contour = build_disc_contour(params, step_params=fp)
+        contour = build_disc_contour(params, flange_params=fp)
         mask = contour.points[:, 1] > r4 - 1.0
         ax.plot(contour.points[mask, 0], contour.points[mask, 1], color=colour, lw=1.5)
         ax.set_aspect("equal", adjustable="box")
@@ -177,7 +177,7 @@ def plot_step_variants(out_dir: Path) -> None:
 def plot_subzone_labels(out_dir: Path) -> None:
     """Figure 3: subzone label colour map on the new contour."""
     params, fp = _get_params_and_steps()
-    contour = build_disc_contour(params, step_params=fp)
+    contour = build_disc_contour(params, flange_params=fp)
 
     fig, ax = plt.subplots(figsize=(9, 7))
     pts = contour.points
@@ -213,7 +213,7 @@ def plot_stress_comparison(out_dir: Path) -> None:
 
     for label, kwargs in [
         ("no_step",    {"use_steps": False}),
-        ("with_steps", {"use_steps": True, "step_param_offsets": {}}),
+        ("with_steps", {"use_steps": True, "flange_param_offsets": {}}),
     ]:
         print(f"  Generating {label} full sample for stress plot...")
         s = generate_sample(
@@ -256,19 +256,19 @@ def plot_zoomed_steps(out_dir: Path) -> None:
 
     # Asymmetric variant
     asym_offs = {
-        "front_step_radial_height": +0.15,
-        "rear_step_radial_height":  -0.15,
-        "front_step_axial_length":  +0.20,
-        "rear_step_axial_length":   -0.20,
+        "front_flange_radial_height": +0.15,
+        "rear_flange_radial_height":  -0.15,
+        "front_flange_axial_length":  +0.20,
+        "rear_flange_axial_length":   -0.20,
     }
     t_rim = float(params["rim_thickness"])
-    fp_asym = sanitize_step_parameters(
-        resolve_step_parameters(clip_step_offsets_to_bounds(asym_offs)),
+    fp_asym = sanitize_flange_parameters(
+        resolve_flange_parameters(clip_flange_offsets_to_bounds(asym_offs)),
         t_rim,
     )
 
-    contour_nom  = build_disc_contour(params, step_params=fp_nom)
-    contour_asym = build_disc_contour(params, step_params=fp_asym)
+    contour_nom  = build_disc_contour(params, flange_params=fp_nom)
+    contour_asym = build_disc_contour(params, flange_params=fp_asym)
 
     from Data_gen.config import radial_stations_from_params
     rb = radial_stations_from_params(params)

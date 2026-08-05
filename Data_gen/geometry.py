@@ -492,6 +492,7 @@ def build_disc_contour(
         "r_inner":                np.array([r0], dtype=np.float64),
         "r_outer":                np.array([r5], dtype=np.float64),
         "r_flange_outer":         np.array([r_flange_outer], dtype=np.float64),
+        "r_step_outer":           np.array([r_flange_outer], dtype=np.float64),
     }
     landmarks_mm.update(rim_feature_points)
 

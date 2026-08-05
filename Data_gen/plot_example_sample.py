@@ -14,8 +14,8 @@ import numpy as np
 try:
     from .config import (
         CYCLE_PHASES, NOMINAL_FLANGE_MM, NOMINAL_GEOMETRY_MM,
-        radial_stations_from_params, resolve_step_parameters,
-        clip_step_offsets_to_bounds,
+        radial_stations_from_params, resolve_flange_parameters,
+        clip_flange_offsets_to_bounds,
     )
     from .sample_generator import generate_sample
 except ImportError:
@@ -24,8 +24,8 @@ except ImportError:
         sys.path.insert(0, str(repo_root))
     from Data_gen.config import (
         CYCLE_PHASES, NOMINAL_FLANGE_MM, NOMINAL_GEOMETRY_MM,
-        radial_stations_from_params, resolve_step_parameters,
-        clip_step_offsets_to_bounds,
+        radial_stations_from_params, resolve_flange_parameters,
+        clip_flange_offsets_to_bounds,
     )
     from Data_gen.sample_generator import generate_sample
 
@@ -232,8 +232,8 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
 
     # 2. Nominal step parameter sanity
     nf = NOMINAL_FLANGE_MM
-    total_ax = (nf["front_step_axial_length"] + nf["front_shoulder_offset"]
-                + nf["rear_step_axial_length"] + nf["rear_shoulder_offset"])
+    total_ax = (nf["front_flange_axial_length"] + nf["front_shoulder_offset"]
+                + nf["rear_flange_axial_length"] + nf["rear_shoulder_offset"])
     fl_fits = total_ax < 0.90 * rt
     print(f"[{'PASS' if fl_fits else 'FAIL'}] Nominal step axial extent ({total_ax:.1f} mm) < 0.90×rim ({0.90*rt:.1f} mm)")
 
@@ -241,14 +241,14 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         label: str,
         offsets: dict[str, float],
         seed: int,
-        step_offsets: dict[str, float] | None = None,
+        flange_offsets: dict[str, float] | None = None,
     ) -> None:
         s_full = generate_sample(
             param_offsets=offsets,
             representation="full",
             seed=seed,
             include_debug_fields=True,
-            step_param_offsets=step_offsets,
+            flange_param_offsets=flange_offsets,
         )
         params = s_full["geometry_parameters_actual"]
         fp_act = s_full.get("step_parameters_actual", {})
@@ -299,10 +299,10 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         # -----------------------------------------------------------------
         # Stepped rim geometry checks
         # -----------------------------------------------------------------
-        h_fl = float(fp_act.get("front_step_radial_height", 0.0))
-        h_rl = float(fp_act.get("rear_step_radial_height", 0.0))
-        fl_ax = float(fp_act.get("front_step_axial_length", 0.0))
-        rl_ax = float(fp_act.get("rear_step_axial_length", 0.0))
+        h_fl = float(fp_act.get("front_flange_radial_height", 0.0))
+        h_rl = float(fp_act.get("rear_flange_radial_height", 0.0))
+        fl_ax = float(fp_act.get("front_flange_axial_length", 0.0))
+        rl_ax = float(fp_act.get("rear_flange_axial_length", 0.0))
         sh_f = float(fp_act.get("front_shoulder_offset", 0.0))
         sh_r = float(fp_act.get("rear_shoulder_offset", 0.0))
         rf_f = float(fp_act.get("front_fillet_radius", 0.0))
@@ -400,19 +400,19 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
     }
     # Asymmetric step offsets for offset sample: front and rear differ.
     asym_step_offset = {
-        "front_step_axial_length": +0.20,
-        "rear_step_axial_length":  -0.20,
-        "front_step_radial_height": +0.15,
-        "rear_step_radial_height":  -0.15,
+        "front_flange_axial_length": +0.20,
+        "rear_flange_axial_length":  -0.20,
+        "front_flange_radial_height": +0.15,
+        "rear_flange_radial_height":  -0.15,
         "front_shoulder_offset": +0.10,
         "rear_shoulder_offset":  -0.10,
     }
-    _validate_one("Nominal", {}, seed=0, step_offsets={})
+    _validate_one("Nominal", {}, seed=0, flange_offsets={})
     _validate_one(
         "Offset (asymmetric steps)",
         param_offsets if param_offsets else default_offset,
         seed=13,
-        step_offsets=clip_step_offsets_to_bounds(asym_step_offset),
+        flange_offsets=clip_flange_offsets_to_bounds(asym_step_offset),
     )
 
     print("=== End validation ===\n")
