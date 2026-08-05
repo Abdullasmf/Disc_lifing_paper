@@ -125,16 +125,23 @@ def plot_contour_comparison(out_dir: Path) -> None:
 
 
 def plot_flange_variants(out_dir: Path) -> None:
-    """Figure 2: outer-cap region for nominal + 4 deviated variants."""
+    """Figure 2: outer-cap region for nominal + 4 deviated variants + 1 asymmetric variant."""
     params, fp_nom = _get_params_and_flanges()
 
     # Define some deviated variants (within the nominal ± offset bounds).
+    # Last variant is deliberately asymmetric (front != rear).
     variants = {
         "nominal":              {},
         "+fl_height+0.2":       {"front_flange_radial_height": +0.2, "rear_flange_radial_height": +0.2},
         "-fl_height-0.2":       {"front_flange_radial_height": -0.2, "rear_flange_radial_height": -0.2},
         "+fl_axial+0.3":        {"front_flange_axial_length": +0.3, "rear_flange_axial_length": +0.3},
         "+fillet+0.1":          {"front_fillet_radius": +0.1, "rear_fillet_radius": +0.1},
+        "asymmetric":           {
+            "front_flange_radial_height": +0.15,
+            "rear_flange_radial_height":  -0.15,
+            "front_flange_axial_length":  +0.20,
+            "rear_flange_axial_length":   -0.20,
+        },
     }
 
     from Data_gen.config import radial_stations_from_params
@@ -243,6 +250,64 @@ def plot_stress_comparison(out_dir: Path) -> None:
         print(f"Saved: {fname}")
 
 
+def plot_zoomed_flanges(out_dir: Path) -> None:
+    """Figure: zoomed views of front and rear flange regions (nominal + asymmetric)."""
+    params, fp_nom = _get_params_and_flanges()
+
+    # Asymmetric variant
+    asym_offs = {
+        "front_flange_radial_height": +0.15,
+        "rear_flange_radial_height":  -0.15,
+        "front_flange_axial_length":  +0.20,
+        "rear_flange_axial_length":   -0.20,
+    }
+    t_rim = float(params["rim_thickness"])
+    fp_asym = sanitize_flange_parameters(
+        resolve_flange_parameters(clip_flange_offsets_to_bounds(asym_offs)),
+        t_rim,
+    )
+
+    contour_nom  = build_disc_contour(params, flange_params=fp_nom)
+    contour_asym = build_disc_contour(params, flange_params=fp_asym)
+
+    from Data_gen.config import radial_stations_from_params
+    rb = radial_stations_from_params(params)
+    r4, r5 = float(rb[4]), float(rb[5])
+    x_front = -0.5 * t_rim
+    x_rear  = +0.5 * t_rim
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+
+    for row_idx, (label, contour) in enumerate([("Nominal", contour_nom), ("Asymmetric", contour_asym)]):
+        pts = contour.points
+        rim_mask = pts[:, 1] > r4 - 1.0
+
+        for col_idx, (side, x_center) in enumerate([("Front", x_front), ("Rear", x_rear)]):
+            ax = axes[row_idx, col_idx]
+            margin_x = 4.0
+            margin_r = 1.0
+            r_max = float(pts[:, 1].max()) + margin_r
+            mask = rim_mask & (pts[:, 0] >= x_center - margin_x) & (pts[:, 0] <= x_center + margin_x)
+            ax.plot(pts[mask, 0], pts[mask, 1], "k-", lw=1.5)
+            ax.axhline(r5, color="blue", ls=":", lw=0.8, alpha=0.7, label=f"r5={r5:.1f}")
+            ax.axhline(r_max - margin_r, color="orange", ls=":", lw=0.8, alpha=0.7)
+            ax.axvline(x_center, color="red", ls="--", lw=0.8, alpha=0.6, label=f"x={x_center:.1f}")
+            ax.set_xlim(x_center - margin_x, x_center + margin_x)
+            ax.set_ylim(r5 - 1.0, r_max)
+            ax.set_title(f"{label} / {side} flange (zoomed)", fontsize=9)
+            ax.set_xlabel("x [mm]")
+            ax.set_ylabel("r [mm]")
+            ax.legend(fontsize=7)
+            ax.set_aspect("equal", adjustable="box")
+            ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_dir / "flange_zoom.png", dpi=180)
+    plt.close(fig)
+    print(f"Saved: {out_dir/'flange_zoom.png'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate old vs new disc contour with flanges.")
     parser.add_argument("--output-dir", type=Path,
@@ -257,6 +322,7 @@ def main() -> None:
     plot_contour_comparison(out_dir)
     plot_flange_variants(out_dir)
     plot_subzone_labels(out_dir)
+    plot_zoomed_flanges(out_dir)
 
     if not args.skip_stress:
         print("Generating FEM stress comparison plots (this takes 1-3 min each)...")
