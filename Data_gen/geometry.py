@@ -200,14 +200,14 @@ def sanitize_flange_parameters(fp: Dict[str, float], t_rim: float) -> Dict[str, 
         ):
             out[key] *= scale
 
-    def _enforce_side(prefix: str, shoulder_key: str, land_key: str, corner_key: str) -> None:
+    def _enforce_side(prefix: str, shoulder_key: str, land_key: str, corner_key: str, height_key: str) -> None:
         out[land_key] = max(out[land_key], out[corner_key] + min_land)
         out[shoulder_key] = max(out[shoulder_key], out[prefix] + 0.6)
         out[prefix] = min(out[prefix], 0.45 * out[shoulder_key], 0.45 * out[land_key])
-        out[corner_key] = min(out[corner_key], 0.45 * out[land_key], 0.45 * out["front_flange_radial_height"])
+        out[corner_key] = min(out[corner_key], 0.45 * out[land_key], 0.45 * out[height_key])
 
-    _enforce_side("rim_to_flange_fillet_radius_front", "front_shoulder_offset", "front_flange_axial_length", "front_fillet_radius")
-    _enforce_side("rim_to_flange_fillet_radius_rear", "rear_shoulder_offset", "rear_flange_axial_length", "rear_fillet_radius")
+    _enforce_side("rim_to_flange_fillet_radius_front", "front_shoulder_offset", "front_flange_axial_length", "front_fillet_radius", "front_flange_radial_height")
+    _enforce_side("rim_to_flange_fillet_radius_rear", "rear_shoulder_offset", "rear_flange_axial_length", "rear_fillet_radius", "rear_flange_radial_height")
 
     total_ax = (
         out["front_flange_axial_length"] + out["front_shoulder_offset"]

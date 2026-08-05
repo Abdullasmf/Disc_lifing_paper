@@ -251,7 +251,7 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
             flange_param_offsets=flange_offsets,
         )
         params = s_full["geometry_parameters_actual"]
-        fp_act = s_full.get("step_parameters_actual", {})
+        fp_act = s_full.get("flange_parameters_actual", {})
         rb_arr = radial_stations_from_params(params)
         r1, r2, r3, r4 = rb_arr[1], rb_arr[2], rb_arr[3], rb_arr[4]
         r5 = float(rb_arr[5])

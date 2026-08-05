@@ -344,8 +344,6 @@ def generate_sample(
     out["contour_arc_length_mm"] = contour.arc_length_mm.astype(np.float64)
     out["zone_names"] = np.array(contour.zone_names, dtype="S32")
     out["subzone_names"] = np.array(contour.subzone_names, dtype="S32")
-    if "rim_feature_points" in contour.landmarks_mm:
-        pass
     for key, value in contour.landmarks_mm.items():
         if key in {"lower_transition_start", "lower_transition_end", "upper_transition_start", "upper_transition_end", "r_inner", "r_outer", "r_flange_outer"}:
             continue

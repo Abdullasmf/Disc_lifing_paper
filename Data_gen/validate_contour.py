@@ -1,10 +1,10 @@
-"""Validation plots: old (no-step) vs new (stepd) outer contour.
+"""Validation plots: old (no-step) vs new (stepped) outer contour.
 
 Generates diagnostic figures saved to Data_gen/output/validation_contour/:
   1. contour_comparison.png  – old nominal vs new nominal contour overlay
   2. step_variants.png     – 4 deviated step variants on the outer-cap region
   3. stress_contour_old.png  – stress on old-style contour (no steps)
-  4. stress_contour_new.png  – stress on new stepd contour (nominal steps)
+  4. stress_contour_new.png  – stress on new stepped contour (nominal steps)
   5. subzone_labels.png      – subzone label colour map on new contour
 
 Usage
@@ -71,7 +71,7 @@ def _get_params_and_steps(geo_offsets=None, flange_offsets=None):
 
 
 def plot_contour_comparison(out_dir: Path) -> None:
-    """Figure 1: old (no-step) vs new (stepd) contour overlay."""
+    """Figure 1: old (no-step) vs new (stepped) contour overlay."""
     params, fp = _get_params_and_steps()
 
     contour_old = build_disc_contour(params, flange_params=None)
@@ -207,7 +207,7 @@ def plot_subzone_labels(out_dir: Path) -> None:
 
 
 def plot_stress_comparison(out_dir: Path) -> None:
-    """Figures 4 & 5: stress on outer contour, no-step vs stepd."""
+    """Figures 4 & 5: stress on outer contour, no-step vs stepped."""
     import matplotlib.tri as mtri
     out_dir.mkdir(parents=True, exist_ok=True)
 

@@ -1,3 +1,11 @@
+## Changes in v4.1 (Stepped rim revision)
+
+- Replaced the previous smooth flange-like cap with one moderate stepped-rim feature per axial side in `geometry.py`.
+- Reused the existing front/rear flange parameter names as front/rear stepped-rim controls; each side now follows rim core → root shoulder/fillet → raised land → finite axial land → rounded outer corner → outer rim boundary.
+- Added stepped-rim feature landmarks to sample output/HDF5 for validation and post-processing.
+- Updated gmsh refinement to target the stepped lands and root/outer-corner regions.
+- Kept zonal S-N behavior unchanged: all stepped-rim subzones remain in zone_id=4 and inherit the existing rim S-N curve.
+
 # Data_gen Pipeline Notes
 
 ## Pipeline Overview (v4.0)
