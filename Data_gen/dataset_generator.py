@@ -98,6 +98,28 @@ def _load_flange_offset_bounds(path: Path | None, default_table: Dict[str, float
     return out
 
 
+def sample_offsets_lhs(
+    num_samples: int,
+    min_offsets: Dict[str, float],
+    max_offsets: Dict[str, float],
+    seed: int,
+) -> List[Dict[str, float]]:
+    """LHS sample of core geometry parameter offsets."""
+    d = len(PUBLIC_GEOMETRY_PARAMETERS)
+    lhs = LatinHypercube(d=d, seed=seed % (2**31 - 1))
+    u = lhs.random(n=num_samples)
+
+    lo = np.array([min_offsets[k] for k in PUBLIC_GEOMETRY_PARAMETERS], dtype=np.float64)
+    hi = np.array([max_offsets[k] for k in PUBLIC_GEOMETRY_PARAMETERS], dtype=np.float64)
+    vec = lo[None, :] + u * (hi - lo)[None, :]
+
+    out: List[Dict[str, float]] = []
+    for row in vec:
+        row_dict = {k: float(v) for k, v in zip(PUBLIC_GEOMETRY_PARAMETERS, row)}
+        out.append(clip_offsets_to_bounds(row_dict))
+    return out
+
+
 def sample_flange_offsets_lhs(
     num_samples: int,
     min_offsets: Dict[str, float],

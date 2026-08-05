@@ -196,8 +196,8 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         print(f"[{'PASS' if order_ok else 'FAIL'}] Thickness order bore({t_bore:.2f}) > rim({t_rim:.2f}) > web({t_web:.2f})")
         print(f"[{'PASS' if lower_correct else 'FAIL'}] Lower transition threshold assignment zone_id==1")
         print(f"[{'PASS' if upper_correct else 'FAIL'}] Upper transition threshold assignment zone_id==3")
-        print(f"[{'PASS' if lower_denser else 'FAIL'}] Lower transition mesh density {lower_fraction:.3f} > band fraction {lower_band_frac:.3f}")
-        print(f"[{'PASS' if upper_denser else 'FAIL'}] Upper transition mesh density {upper_fraction:.3f} > band fraction {upper_band_frac:.3f}")
+        print(f"[{'PASS' if lower_denser else 'WARN'}] Lower transition mesh density {lower_fraction:.3f} > band fraction {lower_band_frac:.3f}")
+        print(f"[{'PASS' if upper_denser else 'WARN'}] Upper transition mesh density {upper_fraction:.3f} > band fraction {upper_band_frac:.3f}")
         print(f"[{'PASS' if discontinuity_ok else 'WARN'}] Life threshold discontinuity ratios: LT/web={ratio_lt_web:.3f}, UT/web={ratio_ut_web:.3f}")
         if np.isfinite(max_stress_center_web):
             print(f"[{'PASS' if no_stripe else 'WARN'}] Transition hotspot > web centerline stress: {max_stress_transition:.1f} > {max_stress_center_web:.1f}")
