@@ -89,11 +89,19 @@ def main() -> None:
     blade_force_n = sample.get("blade_equiv_force_N")
     if blade_force_n is not None:
         print(f"Blade-equiv force: {blade_force_n:.4e} N ({sample.get('blade_equiv_load_description', '')})")
-    rim_mask = nodes[:, 0] > 0.3 * float(np.max(nodes[:, 0]))
-    if np.any(rim_mask):
-        rim_peak = float(np.max(stress_max_vm[rim_mask]))
-        print(f"Rear-half peak von Mises (x > 0.3*x_max, blade-load region): {rim_peak:.2f} MPa")
-
+    radial_breaks = sample.get("radial_breaks_mm")
+    r4 = (
+        float(radial_breaks[4])
+        if radial_breaks is not None and len(radial_breaks) > 4
+        else float(np.max(nodes[:, 1])) - 20.0
+    )
+    rim_zone = nodes[:, 1] >= 0.95 * r4
+    if np.any(rim_zone):
+        x_rear = float(np.max(nodes[rim_zone, 0]))
+        rim_mask = rim_zone & (nodes[:, 0] > x_rear - 0.5)  # within 0.5 mm of rear wall
+        if np.any(rim_mask):
+            rim_peak = float(np.max(stress_max_vm[rim_mask]))
+            print(f"Rear-wall/platform peak von Mises (near rear face in rim zone): {rim_peak:.2f} MPa")
     # --- Stress figure (von Mises at takeoff, == stress_max_vm) ---
     triang = mtri.Triangulation(nodes[:, 0], nodes[:, 1], triangles)
     fig1, ax1 = plt.subplots(figsize=(6, 8))
