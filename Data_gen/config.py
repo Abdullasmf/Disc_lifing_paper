@@ -102,9 +102,12 @@ SUBZONE_NAME_TO_ID: Dict[str, int] = {
     "upper_transition":   3,
     "rim_main":           4,   # main outer cap at r = r5
     "front_step":       5,   # front flange face + top
-    "rear_step":        6,   # rear flange face + top
+    "rear_step":        6,   # kept for backward compat; rear side now uses rear_platform*
     "front_shoulder":     7,   # shoulder transition (front flange → main cap)
-    "rear_shoulder":      8,   # shoulder transition (main cap → rear flange)
+    "rear_shoulder":      8,   # shoulder transition (main cap → rear flange); legacy
+    "front_groove":       9,   # relief groove cut into the front step land
+    "rear_platform":     10,   # blade-platform collar land + outer corner + load face
+    "rear_platform_root": 11,  # blade-platform collar root shoulder blend
 }
 SUBZONE_ID_TO_NAME: Dict[int, str] = {v: k for k, v in SUBZONE_NAME_TO_ID.items()}
 
@@ -167,46 +170,97 @@ FLANGE_GEOMETRY_PARAMETERS = (
     "rear_fillet_radius",
     "rim_to_flange_fillet_radius_front",
     "rim_to_flange_fillet_radius_rear",
+    "front_groove_depth",
+    "front_groove_width",
+    "front_groove_pos",
+    "front_groove_radius",
 )
 
+# ---------------------------------------------------------------------------
+# Rear-side naming clarification: the rear "flange" parameters describe a
+# blade-platform surrogate collar (attachment for the blade-equivalent
+# centrifugal load, see BLADE_EQUIV_* below), not a bolted flange:
+#   rear_flange_axial_length          -> platform land length
+#   rear_flange_radial_height         -> platform height above rim core
+#   rear_shoulder_offset              -> platform root shoulder axial extent
+#   rear_fillet_radius                -> platform outer corner fillet
+#   rim_to_flange_fillet_radius_rear  -> platform root fillet
+#
+# Front-side additions describe a relief groove cut into the front step land,
+# immediately inboard of the front step's outer corner fillet:
+#   front_groove_depth   - radial depth of the groove
+#   front_groove_width   - axial width of the groove
+#   front_groove_pos     - axial gap between the front corner fillet and the
+#                          start of the groove entry fillet
+#   front_groove_radius  - fillet radius at groove entry/root corners
+# ---------------------------------------------------------------------------
+
 NOMINAL_FLANGE_MM: Dict[str, float] = {
-    "front_flange_axial_length":          3.5,
-    "rear_flange_axial_length":           3.5,
+    "front_flange_axial_length":          5.5,   # extended to accommodate the relief groove
+    "rear_flange_axial_length":           5.0,   # blade-platform land length
     "front_flange_radial_height":         2.5,
-    "rear_flange_radial_height":          2.5,
+    "rear_flange_radial_height":          2.5,   # blade-platform height
     "front_shoulder_offset":              1.5,
-    "rear_shoulder_offset":               1.5,
+    "rear_shoulder_offset":               2.0,   # blade-platform root extent
     "front_fillet_radius":                1.0,   # top-corner fillet, front flange
-    "rear_fillet_radius":                 1.0,   # top-corner fillet, rear flange
+    "rear_fillet_radius":                 1.0,   # platform outer corner fillet
     "rim_to_flange_fillet_radius_front":  0.8,   # shoulder-blend fillet, front
-    "rim_to_flange_fillet_radius_rear":   0.8,   # shoulder-blend fillet, rear
+    "rim_to_flange_fillet_radius_rear":   1.0,   # platform root fillet
+    "front_groove_depth":                 1.0,   # relief groove radial depth
+    "front_groove_width":                 2.0,   # relief groove axial width
+    "front_groove_pos":                   0.5,   # gap from corner fillet to groove entry
+    "front_groove_radius":                0.6,   # groove entry/root fillet radius
 }
 
 MIN_FLANGE_OFFSET_MM: Dict[str, float] = {
-    "front_flange_axial_length":          -0.30,
-    "rear_flange_axial_length":           -0.30,
+    "front_flange_axial_length":          -0.50,
+    "rear_flange_axial_length":           -0.50,
     "front_flange_radial_height":         -0.20,
     "rear_flange_radial_height":          -0.20,
     "front_shoulder_offset":              -0.20,
-    "rear_shoulder_offset":               -0.20,
+    "rear_shoulder_offset":               -0.25,
     "front_fillet_radius":                -0.10,
     "rear_fillet_radius":                 -0.10,
     "rim_to_flange_fillet_radius_front":  -0.10,
     "rim_to_flange_fillet_radius_rear":   -0.10,
+    "front_groove_depth":                 -0.15,
+    "front_groove_width":                 -0.20,
+    "front_groove_pos":                   -0.10,
+    "front_groove_radius":                -0.08,
 }
 
 MAX_FLANGE_OFFSET_MM: Dict[str, float] = {
-    "front_flange_axial_length":          +0.30,
-    "rear_flange_axial_length":           +0.30,
+    "front_flange_axial_length":          +0.50,
+    "rear_flange_axial_length":           +0.50,
     "front_flange_radial_height":         +0.20,
     "rear_flange_radial_height":          +0.20,
     "front_shoulder_offset":              +0.20,
-    "rear_shoulder_offset":               +0.20,
+    "rear_shoulder_offset":               +0.25,
     "front_fillet_radius":                +0.10,
     "rear_fillet_radius":                 +0.10,
     "rim_to_flange_fillet_radius_front":  +0.10,
     "rim_to_flange_fillet_radius_rear":   +0.10,
+    "front_groove_depth":                 +0.15,
+    "front_groove_width":                 +0.20,
+    "front_groove_pos":                   +0.10,
+    "front_groove_radius":                +0.08,
 }
+
+# ---------------------------------------------------------------------------
+# Blade-equivalent centrifugal load (annular/axisymmetric surrogate)
+# Physical basis: annular average of N blades of mass m_blade each,
+# rotating at omega_ref with CG at r_cg.
+# F_total = N * m_blade * omega_ref^2 * r_cg  [N]
+# Applied as radial traction on the rear platform load-transfer boundary
+# (the vertical rear_platform face at x = +t_rim/2).
+# This load is fixed (identical for every generated sample) — it is not part
+# of the LHS-sampled parameter space.
+# ---------------------------------------------------------------------------
+BLADE_EQUIV_NUM_BLADES: int = 60        # representative blade count
+BLADE_EQUIV_MASS_KG: float = 0.003      # mass per blade [kg]; 3 g each → ~331 kN total at 4000 rad/s
+#   F = 60 × 0.003 kg × (4000 rad/s)² × 0.115 m ≈ 331 kN ≈ 25 % of rim centrifugal
+#   This is physically modest and adds a visible but non-dominating rim-load contribution.
+BLADE_EQUIV_CG_RADIUS_MM: float = 115.0  # blade CG radius [mm] (outboard of rim)
 
 CYCLE_PHASES = (
     "taxi",

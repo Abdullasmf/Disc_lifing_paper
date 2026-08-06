@@ -60,6 +60,9 @@ SUBZONE_COLOURS = {
     "rear_step":      "#b07aa1",
     "front_shoulder":   "#ff9da7",
     "rear_shoulder":    "#9c755f",
+    "front_groove":     "#bab0ac",
+    "rear_platform":    "#d37295",
+    "rear_platform_root": "#8cd17d",
 }
 
 
@@ -212,8 +215,8 @@ def plot_stress_comparison(out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for label, kwargs in [
-        ("no_step",    {"use_steps": False}),
-        ("with_steps", {"use_steps": True, "flange_param_offsets": {}}),
+        ("no_flanges",    {"use_flanges": False}),
+        ("with_flanges", {"use_flanges": True, "flange_param_offsets": {}}),
     ]:
         print(f"  Generating {label} full sample for stress plot...")
         s = generate_sample(
@@ -308,6 +311,69 @@ def plot_zoomed_steps(out_dir: Path) -> None:
     print(f"Saved: {out_dir/'step_zoom.png'}")
 
 
+def plot_rim_feature_zoom(out_dir: Path) -> None:
+    """Figure: zoomed + labelled views of the front relief groove and the rear
+    blade-platform collar (nominal geometry), annotated with feature landmarks."""
+    params, fp = _get_params_and_steps()
+    contour = build_disc_contour(params, flange_params=fp)
+    pts = contour.points
+
+    from Data_gen.config import radial_stations_from_params
+    rb = radial_stations_from_params(params)
+    r5 = float(rb[5])
+    t_rim = float(params["rim_thickness"])
+    x_front = -0.5 * t_rim
+    x_rear = +0.5 * t_rim
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
+
+    # --- Left: front relief groove, zoomed ---
+    ax = axes[0]
+    mask = (pts[:, 1] > r5 - 0.5) & (pts[:, 0] < x_front + 6.0) & (pts[:, 0] > x_front - 0.5)
+    ax.plot(pts[mask, 0], pts[mask, 1], "k.-", lw=1.5, ms=3)
+    for key, colour in [
+        ("front_groove_entry", "tab:blue"),
+        ("front_groove_floor", "tab:red"),
+        ("front_groove_exit", "tab:green"),
+        ("front_outer_corner", "tab:orange"),
+    ]:
+        if key in contour.landmarks_mm:
+            p = contour.landmarks_mm[key]
+            ax.plot(p[0], p[1], "o", color=colour, ms=8, label=key)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title("Front relief groove (zoomed)")
+    ax.set_xlabel("x [mm]")
+    ax.set_ylabel("r [mm]")
+    ax.legend(fontsize=7, loc="lower right")
+    ax.grid(True, alpha=0.3)
+
+    # --- Right: rear blade-platform collar, zoomed ---
+    ax2 = axes[1]
+    mask2 = (pts[:, 1] > r5 - 1.0) & (pts[:, 0] > x_rear - 8.0)
+    ax2.plot(pts[mask2, 0], pts[mask2, 1], "k.-", lw=1.5, ms=3)
+    for key, colour in [
+        ("rear_platform_root_pt", "tab:blue"),
+        ("rear_platform_land_pt", "tab:red"),
+        ("rear_platform_outer_corner", "tab:green"),
+        ("rear_platform_load_face_centroid", "tab:purple"),
+    ]:
+        if key in contour.landmarks_mm:
+            p = contour.landmarks_mm[key]
+            ax2.plot(p[0], p[1], "o", color=colour, ms=8, label=key)
+    ax2.set_aspect("equal", adjustable="box")
+    ax2.set_title("Rear blade-platform collar (zoomed)\n(load-transfer face = blade centrifugal traction)")
+    ax2.set_xlabel("x [mm]")
+    ax2.set_ylabel("r [mm]")
+    ax2.legend(fontsize=7, loc="lower left")
+    ax2.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_dir / "rim_feature_zoom.png", dpi=180)
+    plt.close(fig)
+    print(f"Saved: {out_dir/'rim_feature_zoom.png'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate old vs new disc contour with steps.")
     parser.add_argument("--output-dir", type=Path,
@@ -323,6 +389,7 @@ def main() -> None:
     plot_step_variants(out_dir)
     plot_subzone_labels(out_dir)
     plot_zoomed_steps(out_dir)
+    plot_rim_feature_zoom(out_dir)
 
     if not args.skip_stress:
         print("Generating FEM stress comparison plots (this takes 1-3 min each)...")

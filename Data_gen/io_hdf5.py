@@ -9,6 +9,9 @@ import h5py
 import numpy as np
 
 from .config import (
+    BLADE_EQUIV_CG_RADIUS_MM,
+    BLADE_EQUIV_MASS_KG,
+    BLADE_EQUIV_NUM_BLADES,
     CYCLE_PHASES,
     CYCLE_PHASE_WEIGHTS,
     CYCLE_SPEED_FACTORS,
@@ -83,6 +86,11 @@ def create_dataset_file(
         data=np.array([f"{k}:{ZONE_TO_SUBZONE.get(k, 'rim_main')}" for k in ZONE_NAME_TO_ID.keys()], dtype="S64"),
     )
 
+    # Blade-equivalent centrifugal load metadata (fixed for every sample).
+    h5f.attrs["blade_equiv_num_blades"] = int(BLADE_EQUIV_NUM_BLADES)
+    h5f.attrs["blade_equiv_mass_per_blade_kg"] = float(BLADE_EQUIV_MASS_KG)
+    h5f.attrs["blade_equiv_cg_radius_mm"] = float(BLADE_EQUIV_CG_RADIUS_MM)
+
     h5f.create_group("samples")
     return h5f
 
@@ -110,6 +118,12 @@ def write_sample_group(h5f: h5py.File, sample_id: int, sample_seed: int, sample:
         fl_actual = sg.create_group("flange_parameters_actual")
         for key, value in sample["flange_parameters_actual"].items():
             fl_actual.attrs[key] = float(value)
+
+    # Blade-equivalent load metadata (v5.0 addition).
+    if "blade_equiv_force_N" in sample:
+        sg.attrs["blade_equiv_force_N"] = float(sample["blade_equiv_force_N"])
+    if "blade_equiv_load_description" in sample:
+        sg.attrs["blade_equiv_load_description"] = str(sample["blade_equiv_load_description"])
 
     write_keys = [
         "node_coords_mm",
