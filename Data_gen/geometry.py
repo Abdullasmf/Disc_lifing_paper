@@ -29,6 +29,7 @@ import numpy as np
 
 from .config import (
     REGION_NAME_TO_ID,
+    RIM_FEATURE_PARAMETERS,
     SUBZONE_NAME_TO_ID,
     THICKNESS_ORDERING_GAP_MM,
     ZONE_NAME_TO_ID,
@@ -142,142 +143,98 @@ def _validate_simple_closed_contour(points: np.ndarray) -> None:
 
 
 
-def sanitize_flange_parameters(fp: Dict[str, float], t_rim: float) -> Dict[str, float]:
-    """Clip stepped-rim parameter values to meshable, non-overlapping limits."""
+def sanitize_rim_feature_parameters(
+    fp: Dict[str, float], t_rim: float, bore_thickness: float
+) -> Dict[str, float]:
+    """Clip rim-feature parameter values to meshable, non-overlapping limits.
+
+    Returns a dict with the same keys as RIM_FEATURE_PARAMETERS, with values
+    clipped to physically valid ranges.  Also records whether sanitization was
+    applied.
+    """
     out = {k: max(float(v), 1e-3) for k, v in fp.items()}
 
-    min_land = 0.8
-    min_core = 2.0
-    max_total = 0.88 * float(t_rim)
+    x_front = -0.5 * t_rim
+    x_rear = 0.5 * t_rim
 
-    out["front_flange_radial_height"] = min(out["front_flange_radial_height"], 0.22 * t_rim)
-    out["rear_flange_radial_height"] = min(out["rear_flange_radial_height"], 0.22 * t_rim)
+    h_arm = out["rear_arm_radial_height"]
+    neck_t = out["rear_arm_neck_thickness"]
+    rf_root = out["rear_arm_root_radius"]
+    rf_corner = out["rear_arm_outer_corner_radius"]
+    arm_proj = out["rear_arm_axial_projection"]
 
-    out["front_fillet_radius"] = min(
-        out["front_fillet_radius"],
-        0.45 * out["front_flange_radial_height"],
-        0.45 * out["front_flange_axial_length"],
-    )
-    out["rear_fillet_radius"] = min(
-        out["rear_fillet_radius"],
-        0.45 * out["rear_flange_radial_height"],
-        0.45 * out["rear_flange_axial_length"],
-    )
+    cg_depth = out["front_cgroove_axial_depth"]
+    cg_span = out["front_cgroove_radial_span"]
+    cg_pos = out["front_cgroove_radial_pos"]
+    rf_entry = out["front_cgroove_entry_radius"]
+    rf_floor = out["front_cgroove_floor_radius"]
+    rf_exit = out["front_cgroove_exit_radius"]
 
-    out["rim_to_flange_fillet_radius_front"] = min(
-        out["rim_to_flange_fillet_radius_front"],
-        0.45 * out["front_flange_radial_height"],
-        0.45 * out["front_shoulder_offset"],
-    )
-    out["rim_to_flange_fillet_radius_rear"] = min(
-        out["rim_to_flange_fillet_radius_rear"],
-        0.45 * out["rear_flange_radial_height"],
-        0.45 * out["rear_shoulder_offset"],
-    )
+    # --- Arm radial height: keep modest relative to rim ---
+    h_arm = min(h_arm, 0.45 * t_rim)
+    h_arm = max(h_arm, 2.0)
 
-    out["front_flange_axial_length"] = max(
-        out["front_flange_axial_length"], out["front_fillet_radius"] + min_land
-    )
-    out["rear_flange_axial_length"] = max(
-        out["rear_flange_axial_length"], out["rear_fillet_radius"] + min_land
-    )
+    # --- Arm neck must be visibly narrower than arm body ---
+    neck_t = min(neck_t, h_arm - 1.0)
+    neck_t = max(neck_t, 0.8)
 
-    # --- Front relief groove: clip depth/radius so it stays within the front
-    # step (radial) and fits on the front land alongside the corner fillet and
-    # shoulder blend (axial). Must run before the land-length constraints below
-    # so groove-driven land growth is accounted for in the overlap checks.
-    out["front_groove_depth"] = min(out["front_groove_depth"], 0.9 * out["front_flange_radial_height"])
-    out["front_groove_radius"] = min(
-        out["front_groove_radius"],
-        0.45 * out["front_groove_depth"],
-        0.45 * out["front_groove_width"] / 2.0,
-    )
-    # Floor depth must exceed the groove radius so a real floor/root exists.
-    out["front_groove_depth"] = max(out["front_groove_depth"], out["front_groove_radius"] + 0.2)
-    out["front_groove_depth"] = min(out["front_groove_depth"], 0.9 * out["front_flange_radial_height"])
-    out["front_shoulder_offset"] = max(
-        out["front_shoulder_offset"], out["rim_to_flange_fillet_radius_front"] + 0.6
-    )
-    out["rear_shoulder_offset"] = max(
-        out["rear_shoulder_offset"], out["rim_to_flange_fillet_radius_rear"] + 0.6
-    )
+    # --- Root radius: must fit in neck face and body face ---
+    rf_root_max = min(0.45 * neck_t, 0.45 * (h_arm - neck_t), 0.45 * rf_root + 0.45)
+    rf_root = min(rf_root, rf_root_max)
+    rf_root = max(rf_root, 0.2)
 
-    total_ax = (
-        out["front_flange_axial_length"] + out["front_shoulder_offset"]
-        + out["rear_flange_axial_length"] + out["rear_shoulder_offset"]
-    )
-    if total_ax > max_total:
-        scale = max_total / total_ax
-        for key in (
-            "front_flange_axial_length", "front_shoulder_offset",
-            "rear_flange_axial_length", "rear_shoulder_offset",
-        ):
-            out[key] *= scale
+    # --- Corner radius: must fit within arm body height above neck ---
+    rf_corner = min(rf_corner, 0.45 * (h_arm - neck_t))
+    rf_corner = max(rf_corner, 0.2)
 
-    def _enforce_side(prefix: str, shoulder_key: str, land_key: str, corner_key: str, height_key: str) -> None:
-        out[land_key] = max(out[land_key], out[corner_key] + min_land)
-        out[shoulder_key] = max(out[shoulder_key], out[prefix] + 0.6)
-        out[prefix] = min(out[prefix], 0.45 * out[shoulder_key], 0.45 * out[land_key])
-        out[corner_key] = min(out[corner_key], 0.45 * out[land_key], 0.45 * out[height_key])
+    # --- Arm axial projection: must be large enough for all arm features ---
+    # Minimum: rf_root (neck-bot) + 0.4 (shelf) + rf_root (body-bot) + rf_root (body-top) + 0.3 (land) + rf_corner
+    proj_min = 3.0 * rf_root + 0.4 + 0.3 + rf_corner
+    arm_proj = max(arm_proj, proj_min)
+    # Maximum: bore axial half-width minus t_rim/2 minus 0.5mm clearance
+    proj_max = max(0.5 * bore_thickness - 0.5 * t_rim - 0.5, proj_min + 0.1)
+    arm_proj = min(arm_proj, proj_max)
 
-    _enforce_side("rim_to_flange_fillet_radius_front", "front_shoulder_offset", "front_flange_axial_length", "front_fillet_radius", "front_flange_radial_height")
-    _enforce_side("rim_to_flange_fillet_radius_rear", "rear_shoulder_offset", "rear_flange_axial_length", "rear_fillet_radius", "rear_flange_radial_height")
+    # --- C-groove position and span ---
+    cg_pos = max(cg_pos, 0.3)
+    cg_span = max(cg_span, 1.5)
 
-    total_ax = (
-        out["front_flange_axial_length"] + out["front_shoulder_offset"]
-        + out["rear_flange_axial_length"] + out["rear_shoulder_offset"]
-    )
-    if total_ax > max_total:
-        scale = max_total / total_ax
-        for key in (
-            "front_flange_axial_length", "front_shoulder_offset",
-            "rear_flange_axial_length", "rear_shoulder_offset",
-        ):
-            out[key] *= scale
-        out["front_flange_axial_length"] = max(out["front_flange_axial_length"], out["front_fillet_radius"] + min_land)
-        out["rear_flange_axial_length"] = max(out["rear_flange_axial_length"], out["rear_fillet_radius"] + min_land)
+    # Groove must fit within front face (total height h_arm):
+    # cg_pos + rf_entry (entry) + cg_span + rf_exit (exit) + rf_root (top corner) + 0.3 <= h_arm
+    required_h = cg_pos + rf_entry + cg_span + rf_exit + rf_root + 0.3
+    if required_h > h_arm:
+        # Scale down cg_span to fit
+        available = h_arm - cg_pos - rf_entry - rf_exit - rf_root - 0.3
+        cg_span = max(available, 1.0)
 
-    front_total = out["front_flange_axial_length"] + out["front_shoulder_offset"]
-    rear_total = out["rear_flange_axial_length"] + out["rear_shoulder_offset"]
-    core_land = float(t_rim) - front_total - rear_total
-    if core_land < min_core:
-        deficit = min_core - core_land
-        reducible_front = max(out["front_flange_axial_length"] - (out["front_fillet_radius"] + min_land), 0.0)
-        reducible_rear = max(out["rear_flange_axial_length"] - (out["rear_fillet_radius"] + min_land), 0.0)
-        reducible_sh_f = max(out["front_shoulder_offset"] - (out["rim_to_flange_fillet_radius_front"] + 0.6), 0.0)
-        reducible_sh_r = max(out["rear_shoulder_offset"] - (out["rim_to_flange_fillet_radius_rear"] + 0.6), 0.0)
-        reducible_total = reducible_front + reducible_rear + reducible_sh_f + reducible_sh_r
-        if reducible_total > 1e-9:
-            for key, reducible in (
-                ("front_flange_axial_length", reducible_front),
-                ("rear_flange_axial_length", reducible_rear),
-                ("front_shoulder_offset", reducible_sh_f),
-                ("rear_shoulder_offset", reducible_sh_r),
-            ):
-                out[key] -= deficit * (reducible / reducible_total)
+    # --- C-groove radial features ---
+    rf_floor = min(rf_floor, 0.45 * cg_span / 2.0)
+    rf_floor = max(rf_floor, 0.15)
 
-    # --- Final groove-fits-in-land check, run last since front_flange_axial_length
-    # and front_fillet_radius may have shrunk above due to the overlap/core-land
-    # constraints. The groove must fit strictly within the front step land after
-    # the front outer-corner fillet, leaving a margin before the front shoulder.
-    available_land = out["front_flange_axial_length"] - out["front_fillet_radius"]
-    groove_total = out["front_groove_pos"] + out["front_groove_width"]
-    margin = 0.3
-    if groove_total > available_land - margin:
-        scale = max((available_land - margin) / max(groove_total, 1e-6), 0.0)
-        out["front_groove_pos"] *= scale
-        out["front_groove_width"] *= scale
-    # Re-clip groove radius/depth to the (possibly shrunk) width.
-    out["front_groove_radius"] = min(
-        out["front_groove_radius"],
-        0.45 * out["front_groove_depth"],
-        0.45 * out["front_groove_width"] / 2.0,
-    )
-    out["front_groove_depth"] = max(out["front_groove_depth"], out["front_groove_radius"] + 0.2)
-    out["front_groove_depth"] = min(out["front_groove_depth"], 0.9 * out["front_flange_radial_height"])
-    out["front_groove_pos"] = max(out["front_groove_pos"], 0.05)
-    out["front_groove_width"] = max(out["front_groove_width"], 2.0 * out["front_groove_radius"] + 0.05)
+    rf_entry = min(rf_entry, 0.45 * cg_pos)
+    rf_entry = max(rf_entry, 0.15)
 
+    rf_exit_max = min(h_arm - cg_pos - cg_span, cg_span) * 0.45
+    rf_exit = min(rf_exit, max(rf_exit_max, 0.15))
+    rf_exit = max(rf_exit, 0.15)
+
+    # --- C-groove depth: must leave at least 2mm ligament to arm neck ---
+    # Groove floor at x_front + cg_depth; arm neck face at x_rear.
+    # Ligament axial distance = (x_rear) - (x_front + cg_depth) = t_rim - cg_depth
+    cg_depth = min(cg_depth, t_rim - 2.0)
+    cg_depth = max(cg_depth, 1.5)
+
+    out["rear_arm_radial_height"] = h_arm
+    out["rear_arm_neck_thickness"] = neck_t
+    out["rear_arm_root_radius"] = rf_root
+    out["rear_arm_outer_corner_radius"] = rf_corner
+    out["rear_arm_axial_projection"] = arm_proj
+    out["front_cgroove_axial_depth"] = cg_depth
+    out["front_cgroove_radial_span"] = cg_span
+    out["front_cgroove_radial_pos"] = cg_pos
+    out["front_cgroove_entry_radius"] = rf_entry
+    out["front_cgroove_floor_radius"] = rf_floor
+    out["front_cgroove_exit_radius"] = rf_exit
     return out
 
 
@@ -292,148 +249,280 @@ def _line_points(x0: float, r0: float, x1: float, r1: float, n: int) -> np.ndarr
     return np.column_stack([x, r])
 
 
-def _build_outer_cap_with_flanges(
+def _build_outer_cap_cgroove_arm(
     t_rim: float,
     r5: float,
     fp: Dict[str, float],
     n_per_seg: int = 15,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray]]:
-    """Build the blade-platform surrogate outer boundary.
+    """Build the C-groove + annular drive-arm outer boundary.
 
-    Front side: front step + relief groove immediately inboard of the step's
-    outer corner fillet.  Rear side: blade-platform collar (root shoulder,
-    land, outer corner, load-transfer vertical face).
+    Front side: externally open C-groove cut into the front axial face.
+    Rear side: annular drive arm with visible neck, shelf, body, land, corner,
+               and end face (the blade-equivalent load face).
+
+    Arc convention (in x-r plane):
+      _arc_points(cx, cr, rf, a_start, a_end, n) uses np.linspace(a_start, a_end)
+      CW traversal (solid to the right): decreasing angles.
+      CCW traversal (re-entrant): increasing angles.
+
+    Right-turn (convex external) fillets — CW (decreasing):
+      UP→RIGHT:   cx=x+rf, cr=r-rf, 180→90
+      RIGHT→DOWN: cx=x-rf, cr=r-rf,  90→0
+      LEFT→UP:    cx=x+rf, cr=r+rf, 270→180
+
+    Left-turn (concave re-entrant) fillets — CCW (increasing):
+      RIGHT→UP:   cx=x-rf, cr=r+rf, 270→360
+      UP→LEFT:    cx=x-rf, cr=r-rf,   0→90
+      DOWN→RIGHT: cx=x+rf, cr=r+rf, 180→270  (concave from the arm body's perspective)
     """
     x_front = -0.5 * t_rim
     x_rear = 0.5 * t_rim
 
-    h_f = fp["front_flange_radial_height"]   # front step height
-    land_f = fp["front_flange_axial_length"]  # front step land (measured from x_front)
-    sh_f = fp["front_shoulder_offset"]        # front shoulder blend extent
-    rf_f = fp["front_fillet_radius"]          # front outer corner fillet
-    root_f = fp["rim_to_flange_fillet_radius_front"]  # front shoulder blend fillet
+    # C-groove parameters
+    cg_depth = fp["front_cgroove_axial_depth"]
+    cg_span = fp["front_cgroove_radial_span"]
+    cg_pos = fp["front_cgroove_radial_pos"]
+    rf_entry = fp["front_cgroove_entry_radius"]
+    rf_floor = fp["front_cgroove_floor_radius"]
+    rf_exit = fp["front_cgroove_exit_radius"]
 
-    h_r = fp["rear_flange_radial_height"]    # rear platform height
-    land_r = fp["rear_flange_axial_length"]  # rear platform land length
-    sh_r = fp["rear_shoulder_offset"]        # rear platform root extent
-    rf_r = fp["rear_fillet_radius"]          # rear platform outer corner fillet
-    root_r = fp["rim_to_flange_fillet_radius_rear"]  # rear platform root fillet
+    # Rear drive-arm parameters
+    h_arm = fp["rear_arm_radial_height"]
+    neck_t = fp["rear_arm_neck_thickness"]
+    rf_root = fp["rear_arm_root_radius"]     # used for root corners, body corners, front top
+    rf_corner = fp["rear_arm_outer_corner_radius"]
+    arm_proj = fp["rear_arm_axial_projection"]
 
-    gd = fp["front_groove_depth"]    # groove radial depth
-    gw = fp["front_groove_width"]    # groove axial width
-    gp = fp["front_groove_pos"]      # gap from corner fillet end to groove entry start
-    gr = fp["front_groove_radius"]   # groove entry/root fillet radius
+    # Key x positions
+    x_arm_end = x_rear + arm_proj
+    # x_body_start: where arm body face begins (leaves a visible shelf at neck level)
+    x_body_start = x_rear + rf_root + 0.4 + rf_root  # shelf = rf_root + 0.4 + rf_root
+    # Clamp: body_start must be < arm_end - rf_corner - 0.3 (minimum land)
+    x_body_start = min(x_body_start, x_arm_end - rf_corner - rf_root - 0.3)
+    x_body_start = max(x_body_start, x_rear + 2 * rf_root + 0.2)
 
-    # --- Key x positions ---------------------------------------------------
-    x_land_start = x_front + rf_f          # start of front horizontal land
-    x_groove_entry = x_land_start + gp     # x where groove entry fillet begins
-    x_groove_floor_start = x_groove_entry + gr
-    x_groove_floor_end = x_groove_entry + gw - gr
-    x_groove_exit = x_groove_entry + gw    # x where land resumes after groove
-    x_step_front_end = x_front + land_f    # end of front land / start of shoulder
-    x_root_front_end = x_step_front_end + sh_f  # end of front shoulder = rim core start
-
-    x_root_rear_start = x_rear - sh_r - land_r  # start of rear platform root shoulder
-    x_platform_land_start = x_rear - land_r     # start of rear platform land
-    x_platform_corner_start = x_rear - rf_r     # start of outer corner fillet
-
-    x_core_start = x_root_front_end
-    x_core_end = x_root_rear_start
-
-    if x_core_end <= x_core_start:
-        raise ValueError("Invalid blade-platform geometry: front groove/step and rear platform overlap")
-    if x_groove_exit >= x_step_front_end - 1e-6:
-        raise ValueError("Invalid blade-platform geometry: front relief groove exceeds front land")
+    # Key r positions
+    r_cg_bot = r5 + cg_pos               # bottom of C-groove opening
+    r_cg_top = r5 + cg_pos + cg_span     # top of C-groove opening
+    r_arm_top = r5 + h_arm               # arm body top (= ligament level)
+    r_neck_top = r5 + neck_t             # arm neck top (shelf level)
 
     sz = SUBZONE_NAME_TO_ID
     segs: List[Tuple[np.ndarray, int]] = []
     n_arc = max(8, n_per_seg // 2)
     n_line = max(5, n_per_seg // 2)
-    n_groove = max(6, n_per_seg // 2)
+    n_feat = max(6, n_per_seg // 2)
 
-    # --- Front face (vertical rise) ---
-    segs.append((_line_points(x_front, r5, x_front, r5 + h_f - rf_f, n_line), sz["front_step"]))
+    # ================================================================
+    # FRONT FACE — SECTION A (below C-groove mouth)
+    # ================================================================
+    if r_cg_bot - rf_entry > r5 + 1e-6:
+        segs.append((_line_points(x_front, r5, x_front, r_cg_bot - rf_entry, n_line), sz["front_face"]))
 
-    # --- Front outer corner fillet: 180 deg (on face) -> 90 deg (on land) ---
-    segs.append((_arc_points(x_front + rf_f, r5 + h_f - rf_f, rf_f, 180.0, 90.0, n_arc), sz["front_step"]))
+    # ================================================================
+    # C-GROOVE ENTRY FILLET  (UP → RIGHT, convex)
+    # At corner (x_front, r_cg_bot): UP→RIGHT
+    # cx = x_front + rf_entry, cr = r_cg_bot - rf_entry, 180→90
+    # ================================================================
+    segs.append((_arc_points(x_front + rf_entry, r_cg_bot - rf_entry,
+                             rf_entry, 180.0, 90.0, n_feat), sz["front_cgroove"]))
 
-    # --- Front land: corner fillet end -> groove entry ---
-    if x_groove_entry > x_land_start + 1e-6:
-        segs.append((_line_points(x_land_start, r5 + h_f, x_groove_entry, r5 + h_f, n_line), sz["front_step"]))
+    # ================================================================
+    # C-GROOVE LOWER WALL  (going RIGHT at r = r_cg_bot)
+    # ================================================================
+    x_floor_start = x_front + rf_entry
+    x_floor_end = x_front + cg_depth - rf_floor
+    if x_floor_end > x_floor_start + 1e-6:
+        segs.append((_line_points(x_floor_start, r_cg_bot, x_floor_end, r_cg_bot, n_feat), sz["front_cgroove"]))
 
-    # --- Groove entry fillet: tangent to land at (x_groove_entry, r5+h_f),
-    # curving down-and-right to the top of the left sidewall at
-    # (x_groove_floor_start, r5+h_f-gr).  Center = (x_groove_entry, r5+h_f-gr),
-    # sweep 90 deg (on land) -> 0 deg (top of sidewall).
-    segs.append((_arc_points(x_groove_entry, r5 + h_f - gr, gr, 90.0, 0.0, n_groove), sz["front_groove"]))
+    # ================================================================
+    # C-GROOVE FLOOR LOWER CORNER  (RIGHT → UP, concave)
+    # At corner (x_front+cg_depth, r_cg_bot): RIGHT→UP
+    # cx = (x_front+cg_depth) - rf_floor, cr = r_cg_bot + rf_floor, 270→360
+    # ================================================================
+    segs.append((_arc_points(x_front + cg_depth - rf_floor, r_cg_bot + rf_floor,
+                             rf_floor, 270.0, 360.0, n_feat), sz["front_cgroove"]))
 
-    floor_r = r5 + h_f - gd
-    # --- Left groove sidewall (only if the floor sits below the fillet root) ---
-    if gd > gr + 1e-6:
-        segs.append((_line_points(x_groove_floor_start, r5 + h_f - gr, x_groove_floor_start, floor_r, n_groove), sz["front_groove"]))
+    # ================================================================
+    # C-GROOVE FLOOR FACE  (going UP at x = x_front + cg_depth)
+    # ================================================================
+    r_floor_bot = r_cg_bot + rf_floor
+    r_floor_top = r_cg_top - rf_floor
+    if r_floor_top > r_floor_bot + 1e-6:
+        segs.append((_line_points(x_front + cg_depth, r_floor_bot,
+                                  x_front + cg_depth, r_floor_top, n_feat), sz["front_cgroove"]))
 
-    # --- Groove floor ---
-    if x_groove_floor_end > x_groove_floor_start + 1e-6:
-        segs.append((_line_points(x_groove_floor_start, floor_r, x_groove_floor_end, floor_r, n_groove), sz["front_groove"]))
+    # ================================================================
+    # C-GROOVE FLOOR UPPER CORNER  (UP → LEFT, concave)
+    # At corner (x_front+cg_depth, r_cg_top): UP→LEFT
+    # cx = (x_front+cg_depth) - rf_floor, cr = r_cg_top - rf_floor, 0→90
+    # ================================================================
+    segs.append((_arc_points(x_front + cg_depth - rf_floor, r_cg_top - rf_floor,
+                             rf_floor, 0.0, 90.0, n_feat), sz["front_cgroove"]))
 
-    # --- Right groove sidewall ---
-    if gd > gr + 1e-6:
-        segs.append((_line_points(x_groove_floor_end, floor_r, x_groove_floor_end, r5 + h_f - gr, n_groove), sz["front_groove"]))
+    # ================================================================
+    # C-GROOVE UPPER WALL  (going LEFT at r = r_cg_top)
+    # ================================================================
+    x_upper_wall_end = x_front + rf_exit
+    x_upper_wall_start = x_front + cg_depth - rf_floor
+    if x_upper_wall_start > x_upper_wall_end + 1e-6:
+        segs.append((_line_points(x_upper_wall_start, r_cg_top,
+                                  x_upper_wall_end, r_cg_top, n_feat), sz["front_cgroove"]))
 
-    # --- Groove exit fillet: tangent to top of right sidewall at
-    # (x_groove_floor_end, r5+h_f-gr), curving up-and-right back to land at
-    # (x_groove_exit, r5+h_f).  Center = (x_groove_exit, r5+h_f-gr),
-    # sweep 180 deg (top of sidewall) -> 90 deg (on land).
-    segs.append((_arc_points(x_groove_exit, r5 + h_f - gr, gr, 180.0, 90.0, n_groove), sz["front_groove"]))
+    # ================================================================
+    # C-GROOVE EXIT FILLET  (LEFT → UP, convex)
+    # At corner (x_front, r_cg_top): LEFT→UP
+    # cx = x_front + rf_exit, cr = r_cg_top + rf_exit, 270→180
+    # ================================================================
+    segs.append((_arc_points(x_front + rf_exit, r_cg_top + rf_exit,
+                             rf_exit, 270.0, 180.0, n_feat), sz["front_face"]))
 
-    # --- Front land: groove exit -> front shoulder start ---
-    if x_step_front_end > x_groove_exit + 1e-6:
-        segs.append((_line_points(x_groove_exit, r5 + h_f, x_step_front_end, r5 + h_f, n_line), sz["front_step"]))
+    # ================================================================
+    # FRONT FACE — SECTION B (above C-groove exit)
+    # Goes from (x_front, r_cg_top + rf_exit) to (x_front, r_arm_top - rf_root)
+    # then the top-corner fillet (UP→RIGHT, convex)
+    # ================================================================
+    r_front_b_bot = r_cg_top + rf_exit
+    r_front_b_top = r_arm_top - rf_root   # before top-corner fillet
+    if r_front_b_top > r_front_b_bot + 1e-6:
+        segs.append((_line_points(x_front, r_front_b_bot, x_front, r_front_b_top, n_line), sz["front_face"]))
 
-    # --- Front shoulder descent: blend from r5+h_f back down to r5 ---
-    segs.append((_arc_points(x_step_front_end, r5 + h_f - root_f, root_f, 90.0, 0.0, n_arc), sz["front_shoulder"]))
-    segs.append((_line_points(x_step_front_end + root_f, r5 + h_f - root_f, x_root_front_end, r5, max(12, n_per_seg)), sz["front_shoulder"]))
+    # Front face top corner (UP → RIGHT, convex)
+    # At corner (x_front, r_arm_top): UP→RIGHT
+    # cx = x_front + rf_root, cr = r_arm_top - rf_root, 180→90
+    segs.append((_arc_points(x_front + rf_root, r_arm_top - rf_root,
+                             rf_root, 180.0, 90.0, n_arc), sz["rear_arm_neck"]))
 
-    # --- Rim core ---
-    segs.append((_line_points(x_core_start, r5, x_core_end, r5, max(18, 2 * n_per_seg)), sz["rim_main"]))
+    # ================================================================
+    # LIGAMENT  (going RIGHT at r = r_arm_top)
+    # From (x_front + rf_root, r_arm_top) to (x_rear - rf_root, r_arm_top)
+    # ================================================================
+    x_lig_start = x_front + rf_root
+    x_lig_end = x_rear - rf_root      # before arm root top corner
+    if x_lig_end > x_lig_start + 1e-6:
+        segs.append((_line_points(x_lig_start, r_arm_top, x_lig_end, r_arm_top,
+                                  max(12, n_per_seg)), sz["rear_arm_neck"]))
 
-    # --- Rear blade-platform collar: root shoulder rise ---
-    segs.append((_line_points(x_root_rear_start, r5, x_platform_land_start - root_r, r5 + h_r - root_r, max(12, n_per_seg)), sz["rear_platform_root"]))
-    segs.append((_arc_points(x_platform_land_start, r5 + h_r - root_r, root_r, 180.0, 90.0, n_arc), sz["rear_platform_root"]))
+    # ================================================================
+    # ARM ROOT TOP CORNER  (RIGHT → DOWN, convex)
+    # At corner (x_rear, r_arm_top): RIGHT→DOWN
+    # cx = x_rear - rf_root, cr = r_arm_top - rf_root, 90→0
+    # ================================================================
+    segs.append((_arc_points(x_rear - rf_root, r_arm_top - rf_root,
+                             rf_root, 90.0, 0.0, n_arc), sz["rear_arm_neck"]))
 
-    # --- Rear platform land ---
-    segs.append((_line_points(x_platform_land_start, r5 + h_r, x_platform_corner_start, r5 + h_r, max(10, n_per_seg)), sz["rear_platform"]))
+    # ================================================================
+    # ARM NECK FACE  (going DOWN at x = x_rear)
+    # From (x_rear, r_arm_top - rf_root) to (x_rear, r_neck_top + rf_root)
+    # ================================================================
+    r_neck_face_top = r_arm_top - rf_root
+    r_neck_face_bot = r_neck_top + rf_root   # before neck-bottom fillet
+    if r_neck_face_top > r_neck_face_bot + 1e-6:
+        segs.append((_line_points(x_rear, r_neck_face_top, x_rear, r_neck_face_bot,
+                                  n_feat), sz["rear_arm_neck"]))
 
-    # --- Rear platform outer corner fillet ---
-    segs.append((_arc_points(x_platform_corner_start, r5 + h_r - rf_r, rf_r, 90.0, 0.0, n_arc), sz["rear_platform"]))
+    # ================================================================
+    # ARM NECK BOTTOM CORNER  (DOWN → RIGHT)
+    # Traverses from going-DOWN at x_rear to going-RIGHT at r_neck_top.
+    # Arc formula: cx = x_rear + rf_root, cr = r_neck_top + rf_root, 180→270 (CCW)
+    # At 180°: (x_rear, r_neck_top + rf_root) — on neck face going DOWN ✓
+    # At 270°: (x_rear + rf_root, r_neck_top) — on shelf going RIGHT ✓
+    # ================================================================
+    segs.append((_arc_points(x_rear + rf_root, r_neck_top + rf_root,
+                             rf_root, 180.0, 270.0, n_feat), sz["rear_arm_neck"]))
 
-    # --- Rear platform face (load-transfer boundary) ---
-    segs.append((_line_points(x_rear, r5 + h_r - rf_r, x_rear, r5, n_line), sz["rear_platform"]))
+    # ================================================================
+    # ARM NECK SHELF  (going RIGHT at r = r_neck_top)
+    # From (x_rear + rf_root, r_neck_top) to (x_body_start - rf_root, r_neck_top)
+    # ================================================================
+    x_shelf_start = x_rear + rf_root
+    x_shelf_end = x_body_start - rf_root
+    if x_shelf_end > x_shelf_start + 1e-6:
+        segs.append((_line_points(x_shelf_start, r_neck_top, x_shelf_end, r_neck_top,
+                                  n_feat), sz["rear_arm_neck"]))
+
+    # ================================================================
+    # ARM BODY LOWER CORNER  (RIGHT → UP, concave re-entrant)
+    # At corner (x_body_start, r_neck_top): RIGHT→UP
+    # cx = x_body_start - rf_root, cr = r_neck_top + rf_root, 270→360
+    # ================================================================
+    segs.append((_arc_points(x_body_start - rf_root, r_neck_top + rf_root,
+                             rf_root, 270.0, 360.0, n_arc), sz["rear_arm_land"]))
+
+    # ================================================================
+    # ARM BODY FACE  (going UP at x = x_body_start)
+    # From (x_body_start, r_neck_top + rf_root) to (x_body_start, r_arm_top - rf_root)
+    # ================================================================
+    r_body_bot = r_neck_top + rf_root
+    r_body_top = r_arm_top - rf_root
+    if r_body_top > r_body_bot + 1e-6:
+        segs.append((_line_points(x_body_start, r_body_bot, x_body_start, r_body_top,
+                                  n_feat), sz["rear_arm_land"]))
+
+    # ================================================================
+    # ARM BODY TOP CORNER  (UP → RIGHT, convex)
+    # At corner (x_body_start, r_arm_top): UP→RIGHT
+    # cx = x_body_start + rf_root, cr = r_arm_top - rf_root, 180→90
+    # ================================================================
+    segs.append((_arc_points(x_body_start + rf_root, r_arm_top - rf_root,
+                             rf_root, 180.0, 90.0, n_arc), sz["rear_arm_land"]))
+
+    # ================================================================
+    # ARM LAND  (going RIGHT at r = r_arm_top)
+    # From (x_body_start + rf_root, r_arm_top) to (x_arm_end - rf_corner, r_arm_top)
+    # ================================================================
+    x_land_start = x_body_start + rf_root
+    x_land_end = x_arm_end - rf_corner
+    if x_land_end > x_land_start + 1e-6:
+        segs.append((_line_points(x_land_start, r_arm_top, x_land_end, r_arm_top,
+                                  max(8, n_per_seg)), sz["rear_arm_land"]))
+
+    # ================================================================
+    # ARM OUTER CORNER  (RIGHT → DOWN, convex)
+    # At corner (x_arm_end, r_arm_top): RIGHT→DOWN
+    # cx = x_arm_end - rf_corner, cr = r_arm_top - rf_corner, 90→0
+    # ================================================================
+    segs.append((_arc_points(x_arm_end - rf_corner, r_arm_top - rf_corner,
+                             rf_corner, 90.0, 0.0, n_arc), sz["rear_arm_corner"]))
+
+    # ================================================================
+    # ARM END FACE  (going DOWN at x = x_arm_end) — LOAD FACE
+    # From (x_arm_end, r_arm_top - rf_corner) to (x_arm_end, r5)
+    # ================================================================
+    r_end_top = r_arm_top - rf_corner
+    if r_end_top > r5 + 1e-6:
+        segs.append((_line_points(x_arm_end, r_end_top, x_arm_end, r5,
+                                  n_feat), sz["rear_arm_end_face"]))
+
+    # ================================================================
+    # ARM BOTTOM  (going LEFT at r = r5, back to x_rear)
+    # ================================================================
+    if x_arm_end > x_rear + 1e-6:
+        segs.append((_line_points(x_arm_end, r5, x_rear, r5,
+                                  max(8, n_per_seg)), sz["rim_main"]))
 
     points = np.vstack([s[0] for s in segs]).astype(np.float64)
     subzone = np.concatenate([np.full(s[0].shape[0], s[1], dtype=np.int32) for s in segs])
 
-    r_face_top = r5 + h_r - rf_r
-    r_face_bot = r5
-    r_face_mid = 0.5 * (r_face_top + r_face_bot)
-
+    # --- Feature landmark coordinates ---
+    x_groove_floor = x_front + cg_depth
+    r_groove_floor_mid = 0.5 * (r_cg_bot + r_cg_top)
+    r_load_face_mid = 0.5 * (r5 + r_arm_top - rf_corner)
     feature_meta = {
-        "front_root": np.array([x_step_front_end + 0.5 * root_f, r5 + h_f - 0.5 * root_f], dtype=np.float64),
-        "front_outer_corner": np.array([x_front + 0.5 * rf_f, r5 + h_f - 0.5 * rf_f], dtype=np.float64),
-        "front_groove_entry": np.array([x_groove_entry, r5 + h_f], dtype=np.float64),
-        "front_groove_floor": np.array([0.5 * (x_groove_floor_start + x_groove_floor_end), floor_r], dtype=np.float64),
-        "front_groove_exit": np.array([x_groove_exit, r5 + h_f], dtype=np.float64),
-        "rear_platform_root_pt": np.array([x_root_rear_start + 0.5 * sh_r, r5 + 0.5 * h_r], dtype=np.float64),
-        "rear_platform_land_pt": np.array([0.5 * (x_platform_land_start + x_platform_corner_start), r5 + h_r], dtype=np.float64),
-        "rear_platform_outer_corner": np.array([x_platform_corner_start + 0.5 * rf_r, r5 + h_r - 0.5 * rf_r], dtype=np.float64),
-        "rear_platform_load_face_centroid": np.array([x_rear, r_face_mid], dtype=np.float64),
-        "rim_core_reference": np.array([0.5 * (x_core_start + x_core_end), r5], dtype=np.float64),
-        # Legacy landmark keys retained for backward compatibility with existing
-        # consumers (plotting scripts, feature extraction).
-        "front_land_end": np.array([x_step_front_end, r5 + h_f], dtype=np.float64),
-        "rear_land_start": np.array([x_platform_land_start, r5 + h_r], dtype=np.float64),
-        "rear_root": np.array([x_root_rear_start + 0.5 * sh_r, r5 + 0.5 * h_r], dtype=np.float64),
-        "rear_outer_corner": np.array([x_platform_corner_start + 0.5 * rf_r, r5 + h_r - 0.5 * rf_r], dtype=np.float64),
+        "front_cgroove_entry":        np.array([x_front + rf_entry, r_cg_bot], dtype=np.float64),
+        "front_cgroove_floor":        np.array([x_groove_floor, r_groove_floor_mid], dtype=np.float64),
+        "front_cgroove_exit":         np.array([x_front + rf_exit, r_cg_top], dtype=np.float64),
+        "ligament_reference":         np.array([0.5*(x_front + rf_root + x_rear - rf_root), r_arm_top], dtype=np.float64),
+        "rear_arm_root":              np.array([x_rear, r_arm_top - 0.5*rf_root], dtype=np.float64),
+        "rear_arm_neck":              np.array([x_rear, 0.5*(r5 + r_neck_top)], dtype=np.float64),
+        "rear_arm_outer_corner":      np.array([x_arm_end - 0.5*rf_corner, r_arm_top - 0.5*rf_corner], dtype=np.float64),
+        "rear_arm_load_face_centroid":np.array([x_arm_end, r_load_face_mid], dtype=np.float64),
+        "rim_core_reference":         np.array([x_rear, r5], dtype=np.float64),
+        # Blade traction geometry: arm end face extent
+        "blade_arm_face_x_end_mm":    np.array([x_arm_end], dtype=np.float64),
+        "blade_arm_face_r_min_mm":    np.array([r5], dtype=np.float64),
+        "blade_arm_face_r_max_mm":    np.array([r_arm_top], dtype=np.float64),
     }
     return points, subzone, feature_meta
 
@@ -518,9 +607,9 @@ def _subzone_by_zone(zone_ids: np.ndarray) -> np.ndarray:
 def build_disc_contour(
     params: Dict[str, float],
     points_per_side: int = 220,
-    flange_params: Dict[str, float] | None = None,
+    rim_feature_params: Dict[str, float] | None = None,
 ) -> ContourData:
-    """Build bore/lower-transition/web/upper-transition/rim contour with optional flanges.
+    """Build bore/lower-transition/web/upper-transition/rim contour with C-groove and drive arm.
 
     Parameters
     ----------
@@ -528,10 +617,10 @@ def build_disc_contour(
         Core disc geometry parameters (PUBLIC_GEOMETRY_PARAMETERS keys).
     points_per_side : int
         Number of points for the front and rear faces.
-    flange_params : dict or None
-        Sanitised flange geometry parameters (FLANGE_GEOMETRY_PARAMETERS keys).
-        If *None* or all-zero, the classic flat outer cap is used (no flanges).
-        Pass the result of ``sanitize_flange_parameters`` to ensure validity.
+    rim_feature_params : dict or None
+        Sanitised rim-feature parameters (RIM_FEATURE_PARAMETERS keys).
+        If *None*, use a flat outer cap (legacy / no features).
+        Pass the result of ``sanitize_rim_feature_parameters`` to ensure validity.
     """
     validate_geometry_parameters(params)
 
@@ -553,17 +642,14 @@ def build_disc_contour(
     front_zone = _zone_by_radius(front_r, radial_breaks)
     rear_zone  = _zone_by_radius(rear_r,  radial_breaks)
 
-    # ------------------------------------------------------------------
-    # Outer cap (with or without flanges)
-    # ------------------------------------------------------------------
     t_rim = float(params["rim_thickness"])
+    bore_t = float(params["bore_thickness"])
 
-    if flange_params is not None:
-        outer_cap_pts, outer_cap_subzone, rim_feature_points = _build_outer_cap_with_flanges(
-            t_rim=t_rim, r5=r5, fp=flange_params
+    if rim_feature_params is not None:
+        outer_cap_pts, outer_cap_subzone, rim_feature_points = _build_outer_cap_cgroove_arm(
+            t_rim=t_rim, r5=r5, fp=rim_feature_params
         )
     else:
-        # Legacy flat outer cap (no flanges)
         outer_cap_pts = np.column_stack([
             np.linspace(-0.5 * t_rim, +0.5 * t_rim, 20, endpoint=False),
             np.full(20, r5, dtype=np.float64),
@@ -586,7 +672,6 @@ def build_disc_contour(
     ])
     region_ids  = _region_from_zone(zone_ids)
 
-    # Subzone IDs: use outer_cap_subzone for outer cap, zone→subzone mapping elsewhere.
     front_subzone = _subzone_by_zone(front_zone)
     rear_subzone  = _subzone_by_zone(rear_zone)
     inner_cap_subzone = np.full(inner_cap.shape[0], SUBZONE_NAME_TO_ID["bore"], dtype=np.int32)
@@ -597,12 +682,9 @@ def build_disc_contour(
     _validate_simple_closed_contour(contour_points)
     arc_length_mm = _polyline_arc_length(contour_points)
 
-    r_flange_outer = r5
-    if flange_params is not None:
-        r_flange_outer = r5 + max(
-            float(flange_params.get("front_flange_radial_height", 0.0)),
-            float(flange_params.get("rear_flange_radial_height", 0.0)),
-        )
+    r_arm_outer = r5
+    if rim_feature_params is not None:
+        r_arm_outer = r5 + float(rim_feature_params.get("rear_arm_radial_height", 0.0))
 
     landmarks_mm = {
         "lower_transition_start": np.array([0.0, r1], dtype=np.float64),
@@ -611,8 +693,8 @@ def build_disc_contour(
         "upper_transition_end":   np.array([0.0, r4], dtype=np.float64),
         "r_inner":                np.array([r0], dtype=np.float64),
         "r_outer":                np.array([r5], dtype=np.float64),
-        "r_flange_outer":         np.array([r_flange_outer], dtype=np.float64),
-        "r_step_outer":           np.array([r_flange_outer], dtype=np.float64),
+        "r_arm_outer":            np.array([r_arm_outer], dtype=np.float64),
+        "r_step_outer":           np.array([r_arm_outer], dtype=np.float64),
     }
     landmarks_mm.update(rim_feature_points)
 
@@ -625,14 +707,17 @@ def build_disc_contour(
             ZONE_NAME_TO_ID["upper_transition"],
             ZONE_NAME_TO_ID["rim"],
         ], dtype=np.int32),
-        "has_flanges": np.array([flange_params is not None], dtype=bool),
+        "has_rim_features": np.array([rim_feature_params is not None], dtype=bool),
     }
+    if rim_feature_params is not None:
+        x_rear = 0.5 * t_rim
+        arm_proj = float(rim_feature_params["rear_arm_axial_projection"])
+        h_arm = float(rim_feature_params["rear_arm_radial_height"])
+        metadata["blade_arm_face_x_end_mm"] = np.array([x_rear + arm_proj], dtype=np.float64)
+        metadata["blade_arm_face_r_min_mm"] = np.array([r5], dtype=np.float64)
+        metadata["blade_arm_face_r_max_mm"] = np.array([r5 + h_arm], dtype=np.float64)
 
-    subzone_name_list = list({
-        "bore", "lower_transition", "web", "upper_transition",
-        "rim_main", "front_step", "rear_step", "front_shoulder", "rear_shoulder",
-        "front_groove", "rear_platform", "rear_platform_root",
-    })
+    subzone_name_list = list(SUBZONE_NAME_TO_ID.keys())
 
     return ContourData(
         points=contour_points.astype(np.float64),
