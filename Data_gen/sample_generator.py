@@ -8,17 +8,17 @@ from scipy.spatial import cKDTree
 
 from .config import (
     CYCLE_SPEED_FACTORS,
-    FLANGE_GEOMETRY_PARAMETERS,
+    RIM_FEATURE_PARAMETERS,
     REPRESENTATIONS,
     SUBZONE_NAME_TO_ID,
     SampleGenerationConfig,
-    clip_flange_offsets_to_bounds,
     clip_offsets_to_bounds,
-    resolve_flange_parameters,
+    clip_rim_feature_offsets_to_bounds,
     resolve_geometry_parameters,
+    resolve_rim_feature_parameters,
 )
 from .features import contour_derivative_features, empty_features, resample_contour_uniform_arc_length
-from .geometry import build_disc_contour, sanitize_flange_parameters, sanitize_geometry_parameters
+from .geometry import build_disc_contour, sanitize_geometry_parameters, sanitize_rim_feature_parameters
 from .mesh_ops import assign_zone_and_region_from_radius, generate_mesh
 from .physics import (
     OMEGA_REF_RAD_S,
@@ -92,8 +92,7 @@ def generate_sample(
     include_derivatives: bool = True,
     include_debug_fields: bool = False,
     lifing_mode: str = "zonal",
-    flange_param_offsets: dict[str, float] | None = None,
-    use_flanges: bool = True,
+    rim_feature_offsets: dict[str, float] | None = None,
 ) -> dict:
     """Generate one complete deterministic sample from one offset vector.
 
@@ -111,15 +110,10 @@ def generate_sample(
         Whether to include distance-to-contour debug arrays.
     lifing_mode : str
         ``"zonal"`` or ``"uniform"`` S-N law selection.
-    flange_param_offsets : dict or None
-        Offsets from nominal for the 10 flange geometry parameters.
-        If *None*, flanges are generated at their nominal values.
-        Pass an empty dict ``{}`` to use all-nominal flange geometry.
-        Only used when ``use_flanges=True`` (the default).
-    use_flanges : bool
-        If *True* (default), generate front/rear flanges on the outer rim.
-        If *False*, use the legacy flat outer cap (no flanges).
-        This flag is primarily intended for validation/comparison runs.
+    rim_feature_offsets : dict or None
+        Offsets from nominal for the 11 rim-feature parameters
+        (front C-groove + rear annular drive arm).
+        If *None* or ``{}``, rim features are generated at their nominal values.
     """
     if representation not in REPRESENTATIONS:
         raise ValueError(f"representation must be one of {REPRESENTATIONS}")
@@ -128,21 +122,19 @@ def generate_sample(
     clipped_offsets = clip_offsets_to_bounds(param_offsets)
     actual_params = sanitize_geometry_parameters(resolve_geometry_parameters(clipped_offsets))
 
-    # Flange parameters: resolve only when use_flanges=True.
-    if use_flanges:
-        clipped_flange_offsets = clip_flange_offsets_to_bounds(flange_param_offsets or {})
-        raw_flange_params = resolve_flange_parameters(clipped_flange_offsets)
-        actual_flange_params = sanitize_flange_parameters(raw_flange_params, t_rim=actual_params["rim_thickness"])
-        _build_flange_params: dict | None = actual_flange_params
-    else:
-        clipped_flange_offsets = {k: 0.0 for k in FLANGE_GEOMETRY_PARAMETERS}
-        actual_flange_params = {k: 0.0 for k in FLANGE_GEOMETRY_PARAMETERS}
-        _build_flange_params = None   # legacy flat outer cap
+    # Rim-feature parameters: C-groove + rear drive arm.
+    clipped_rim_feature_offsets = clip_rim_feature_offsets_to_bounds(rim_feature_offsets or {})
+    raw_rim_feature_params = resolve_rim_feature_parameters(clipped_rim_feature_offsets)
+    actual_rim_feature_params = sanitize_rim_feature_parameters(
+        raw_rim_feature_params,
+        t_rim=actual_params["rim_thickness"],
+        bore_thickness=actual_params["bore_thickness"],
+    )
 
     contour = build_disc_contour(
         actual_params,
         points_per_side=cfg.contour_points_per_side,
-        flange_params=_build_flange_params,
+        rim_feature_params=actual_rim_feature_params,
     )
     radial_breaks = contour.metadata["radial_breaks_mm"]
 
@@ -153,6 +145,7 @@ def generate_sample(
         seed=int(seed),
         radial_breaks=radial_breaks,
         geometry_params=actual_params,
+        rim_feature_params=actual_rim_feature_params,
     )
 
     # Zone and region assigned purely from radius thresholds – no nearest-contour voting.
@@ -164,6 +157,9 @@ def generate_sample(
     distance_to_contour = mesh.distance_to_contour
 
     # Single axisymmetric FEM solve on the mesh; phases scaled inside the solver.
+    # Pass arm end-face bounds from geometry metadata for precise blade load application.
+    _arm_meta = {k: v for k, v in contour.metadata.items()
+                 if k.startswith("blade_arm_face_")}
     mesh_phase_stress = compute_phase_equivalent_stresses(
         nodes=mesh.nodes,
         zone_ids=mesh_zone_id,
@@ -172,6 +168,7 @@ def generate_sample(
         radial_breaks=radial_breaks,
         mesh_obj=mesh.mesh,
         triangles=mesh.triangles,
+        arm_face_metadata=_arm_meta,
     )
     fem_failed = not np.any(mesh_phase_stress)  # True if all-zero (FEM failure)
     mesh_stress_max_vm = compute_stress_max(mesh_phase_stress)
@@ -251,8 +248,8 @@ def generate_sample(
         out = {
             "param_offsets": {k: float(v) for k, v in clipped_offsets.items()},
             "geometry_parameters_actual": {k: float(v) for k, v in actual_params.items()},
-            "flange_param_offsets": {k: float(v) for k, v in clipped_flange_offsets.items()},
-            "flange_parameters_actual": {k: float(v) for k, v in actual_flange_params.items()},
+            "rim_feature_offsets": {k: float(v) for k, v in clipped_rim_feature_offsets.items()},
+            "rim_feature_parameters_actual": {k: float(v) for k, v in actual_rim_feature_params.items()},
             "representation": representation,
             "node_coords_mm": edge_points,
             "zone_id": edge_zone,
@@ -297,8 +294,8 @@ def generate_sample(
         out = {
             "param_offsets": {k: float(v) for k, v in clipped_offsets.items()},
             "geometry_parameters_actual": {k: float(v) for k, v in actual_params.items()},
-            "flange_param_offsets": {k: float(v) for k, v in clipped_flange_offsets.items()},
-            "flange_parameters_actual": {k: float(v) for k, v in actual_flange_params.items()},
+            "rim_feature_offsets": {k: float(v) for k, v in clipped_rim_feature_offsets.items()},
+            "rim_feature_parameters_actual": {k: float(v) for k, v in actual_rim_feature_params.items()},
             "representation": representation,
             "node_coords_mm": node_coords,
             "zone_id": zone_id,
@@ -322,8 +319,8 @@ def generate_sample(
         out = {
             "param_offsets": {k: float(v) for k, v in clipped_offsets.items()},
             "geometry_parameters_actual": {k: float(v) for k, v in actual_params.items()},
-            "flange_param_offsets": {k: float(v) for k, v in clipped_flange_offsets.items()},
-            "flange_parameters_actual": {k: float(v) for k, v in actual_flange_params.items()},
+            "rim_feature_offsets": {k: float(v) for k, v in clipped_rim_feature_offsets.items()},
+            "rim_feature_parameters_actual": {k: float(v) for k, v in actual_rim_feature_params.items()},
             "representation": representation,
             "node_coords_mm": mesh.nodes,
             "zone_id": mesh_zone_id,
@@ -344,7 +341,7 @@ def generate_sample(
     out["lifing_mode"] = lifing_mode
     out["triangles"] = mesh.triangles.astype(np.int32)
     out["blade_equiv_force_N"] = float(blade_equiv_force_n(OMEGA_REF_RAD_S))
-    out["blade_equiv_load_description"] = "annular_blade_mass_centrifugal_surrogate_rear_platform_face"
+    out["blade_equiv_load_description"] = "annular_blade_mass_centrifugal_surrogate_rear_arm_end_face"
     out["contour_points_mm"] = contour.points.astype(np.float64)
     out["contour_zone_id"] = contour_zone_id.astype(np.int32)
     out["contour_subzone_id"] = contour.subzone_ids.astype(np.int32)
