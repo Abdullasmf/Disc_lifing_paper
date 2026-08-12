@@ -28,19 +28,14 @@ except ImportError:
     from Data_gen.sample_generator import generate_sample
 
 
-# NOTE: peak stress moved from the ~300-800 MPa band (pure centrifugal body
-# load) to a much higher band once the blade-equivalent rear-platform
-# traction was added.  The blade-equivalent force (F_total = N * m_blade *
-# omega_ref^2 * r_cg = 60 * 0.050 kg * 4000^2 * 0.115 m ~= 5.52 MN) is applied
-# over the comparatively small rim rear-wall/platform face area, giving a
-# nominal traction of ~500 MPa there; because the disc is a linear-elastic
-# model this large boundary load raises the pre-existing bore/web fillet
-# stress concentration (already the governing location under body load
-# alone) roughly 10x, to ~6.7 GPa at nominal geometry.  This is confirmed
-# stable/deterministic at nominal geometry (see validate_fem_nominal run
-# logs); the bound below is calibrated with headroom above that value.
+# With the new C-groove + rear arm geometry, the blade-equivalent traction is
+# applied to the small arm end face (h_arm ~ 5mm height), transferring through
+# the arm root and ligament into the disc body.  The centrifugal body load
+# drives the lower-transition fillet as the global peak; the arm traction
+# adds a secondary contribution.  Total peak at nominal geometry is ~3600 MPa.
+# Bounds below accommodate geometry variation across LHS samples.
 PEAK_STRESS_MIN_MPA = 300.0
-PEAK_STRESS_MAX_MPA = 2500.0
+PEAK_STRESS_MAX_MPA = 8000.0
 
 
 def main() -> None:
