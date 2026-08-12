@@ -1,25 +1,18 @@
-## Changes in v4.1 (Stepped rim revision)
-
-- Replaced the previous smooth flange-like cap with one moderate stepped-rim feature per axial side in `geometry.py`.
-- Reused the existing front/rear flange parameter names as front/rear stepped-rim controls; each side now follows rim core → root shoulder/fillet → raised land → finite axial land → rounded outer corner → outer rim boundary.
-- Added stepped-rim feature landmarks to sample output/HDF5 for validation and post-processing.
-- Updated gmsh refinement to target the stepped lands and root/outer-corner regions.
-- Kept zonal S-N behavior unchanged: all stepped-rim subzones remain in zone_id=4 and inherit the existing rim S-N curve.
-
 # Data_gen Pipeline Notes
 
-## Pipeline Overview (v4.0)
+## Pipeline Overview (v5.0 — C-groove + rear drive arm)
 
 ### Conceptual flow
 
 ```
-config.py          → geometry parameters, S-N curves, zone/subzone maps
+config.py          → geometry parameters, rim-feature parameters, S-N curves, zone/subzone maps
         ↓
-geometry.py        → build_disc_contour() → ContourData (points, zone_ids, subzone_ids)
+geometry.py        → build_disc_contour() → ContourData (points, zone_ids, subzone_ids, landmarks)
         ↓
 mesh_ops.py        → generate_mesh()  → MeshData (MeshTri, nodes, triangles)
         ↓
 physics.py         → axisymmetric FEM solve (scikit-fem, Ti-6Al-4V, 4000 rad/s)
+                   → blade-equivalent traction on rear arm end face
                    → phase stress scaling (7 flight phases)
                    → Palmgren-Miner fatigue life (zonal or uniform S-N)
         ↓
@@ -34,193 +27,123 @@ dataset_generator.py → generate_dataset() (LHS or explicit offsets, batch)
 
 | File | Role |
 |------|------|
-| `config.py` | All constants: zone/subzone IDs, nominal geometry, S-N params, flange params |
-| `geometry.py` | Contour construction: `build_disc_contour()`, flange outer-cap builder |
+| `config.py` | Constants: zone/subzone IDs, nominal geometry, rim-feature params, S-N curves |
+| `geometry.py` | Contour construction: `build_disc_contour()`, C-groove + arm outer-cap builder |
 | `mesh_ops.py` | Gmsh-based unstructured triangular mesh, zone/region assignment |
-| `physics.py` | FEM stress solve + fatigue life (Palmgren-Miner, piecewise log-log S-N) |
+| `physics.py` | FEM stress solve + blade traction + fatigue life (Palmgren-Miner) |
 | `sample_generator.py` | Single-sample orchestrator |
 | `dataset_generator.py` | Batch driver: LHS sampling + HDF5 output |
 | `io_hdf5.py` | HDF5 writer utilities |
 | `features.py` | Arc-length resampling and tangent/curvature edge features |
 | `validate_fem_nominal.py` | FEM sanity check on nominal geometry |
-| `validate_contour.py` | **NEW** Contour comparison and diagnostic plots |
+| `validate_contour.py` | Contour comparison and diagnostic plots |
 | `plot_example_sample.py` | Debug plot for one sample |
+| `mesh_feature_diagnostics.py` | Feature-neighbourhood mesh + stress diagnostics |
+| `compare_mesh_feature_diagnostics.py` | Medium vs fine mesh convergence comparison |
+| `analyze_locality_probe.py` | Local feature-neighbourhood stress/life report |
 
 ---
 
-## Changes in v4.1 (Validation repair)
+## Changes in v5.0 (C-groove + rear drive arm)
+
+The previous smooth flange/collar geometry has been replaced with:
+
+1. A **front-side externally open C-groove** — cut into the front axial face of the rim.
+2. A **rear annular drive arm** — with a visible narrow neck/root, arm body, outer corner fillet,
+   and a finite vertical end/load face.
+3. A **finite visible ligament** — between the C-groove floor and the arm neck/root.
 
 ### What was changed
 
-#### 1. `plot_example_sample.py`
-- **Replaced** the global-fraction mesh density criterion (which produced a `[WARN]`
-  for upper transition on nominal geometry) with a **local spacing criterion**:
-  the 10th-percentile nearest-neighbour distance in each feature zone (LT, UT,
-  flange region) is compared against the 10th-percentile spacing in the bulk web.
-  A ratio ≥ 1.0 (feature zone p10 spacing ≤ web p10 spacing) confirms that
-  LC_FILLET/LC_RIM refinement has taken effect.  The old criterion compared
-  per-zone global node *fractions* to radial band width fractions, which is not
-  a valid density metric.
-- Added comprehensive **flange validation** to every `_validate_one` call:
-  - Resolved front/rear flange parameter values (axial length, radial height,
-    shoulder, top-corner and shoulder fillet radii, computed top-land).
-  - `[PASS/FAIL]` checks for: flange geometrically active, top-land positive,
-    total axial extent < 0.90×rim, contour r_max > r5+0.5.
-  - Flange mesh refinement ratio check (p10 web/flange spacing ≥ 1.0).
-  - Indicative (non-acceptance) FEM stress and life near flange vs rim-flat.
-  - Symmetric / asymmetric geometry label.
-- Offset validation sample now uses **asymmetric flange offsets** to demonstrate
-  independent front/rear parameter variation.
+#### `config.py`
+- Replaced `FLANGE_GEOMETRY_PARAMETERS` / `NOMINAL_FLANGE_MM` / etc. with:
+  - `RIM_FEATURE_PARAMETERS` (11 parameters)
+  - `NOMINAL_RIM_FEATURE_MM` — nominal C-groove and arm values
+  - `MIN_RIM_FEATURE_OFFSET_MM`, `MAX_RIM_FEATURE_OFFSET_MM` — LHS bounds
+  - `resolve_rim_feature_parameters()` — applies offsets to nominal
+  - `clip_rim_feature_offsets_to_bounds()` — clips offsets to configured bounds
+- Updated `SUBZONE_NAME_TO_ID` (11 subzones) for the new geometry.
+- Added blade-equivalent load constants: `BLADE_EQUIV_NUM_BLADES`, `BLADE_EQUIV_MASS_KG`,
+  `BLADE_EQUIV_CG_RADIUS_MM`.
 
-#### 2. `dataset_generator.py`
-- Added `validate_lhs_spread()` function: generates 30-sample LHS draws for
-  both core and flange parameters and verifies:
-  - Each parameter's spread is ≥ 50 % of its configured range (PASS/FAIL).
-  - Front and rear flange parameters vary independently (std of difference > 0).
-  - Flange offsets actually reach `geometry.py` (two samples with same core
-    offsets but different flange offsets produce different actual flange values).
-- Added `--validate-lhs` CLI flag to run the diagnostic and exit.
+#### `geometry.py`
+- `ContourData` gains `subzone_ids` and `subzone_names` fields.
+- `sanitize_rim_feature_parameters()` — enforces meshable, non-overlapping limits.
+- `_build_outer_cap_cgroove_arm()` — builds the full C-groove + arm outer contour.
+- `build_disc_contour(..., rim_feature_params=...)` — accepts new rim-feature dict.
+- Returns landmarks for all C-groove, ligament, arm, and blade-face features.
+- `rim_core_reference` landmark placed at interior rim (x=0, r=r4+40%×rim_height),
+  away from stress concentrations for stable convergence metrics.
 
-#### 3. `validate_contour.py`
-- `plot_flange_variants` now includes a sixth **asymmetric** variant
-  (front_height +0.15, rear_height −0.15, front_axial +0.20, rear_axial −0.20).
-- Added `plot_zoomed_flanges()`: generates `flange_zoom.png` with 2×2 zoomed
-  views of the front and rear flange regions for both nominal and asymmetric
-  parameter sets.
+#### `physics.py`
+- Blade-equivalent traction applied on the tagged rear arm end face via `FacetBasis`.
+- Arm face identified from `blade_arm_face_x_end_mm`, `blade_arm_face_r_min_mm`,
+  `blade_arm_face_r_max_mm` geometry metadata — not broad radial thresholds.
+- If no arm facets found, the load is skipped with a warning (not silently omitted).
 
-### Criterion documentation: local spacing ratio
+#### `sample_generator.py`
+- Accepts `rim_feature_offsets` kwarg (default `None` → nominal rim features).
+- Passes arm-face metadata to FEM for precise blade traction application.
 
-The mesh density criterion is based on the **10th-percentile nearest-neighbour
-distance** among nodes within each zone.
+#### `dataset_generator.py`
+- LHS samples all 11 rim-feature parameters independently.
+- `--validate-lhs` proves nonzero spread for every parameter.
 
-- `_local_spacing_ratio(nodes, zone_ids, zone_id_feature)` returns
-  `p10_nn_web / p10_nn_feature`.
-- A value ≥ 1.0 means the finest elements in the feature zone are at least as
-  small as the finest elements in the web bulk, confirming that the gmsh
-  LC_FILLET (0.5 mm) and LC_RIM (1.2 mm) fields have produced local refinement.
-- A value < 1.0 would indicate the feature zone has coarser finest elements
-  than the web — a genuine regression that should be investigated.
-- The threshold is set at 1.0, not inflated, because with a large transition
-  fillet spanning most of the zone, refinement may be uniformly distributed
-  with the ratio close to unity even when meshing is correct.
+#### `io_hdf5.py`
+- Stores `rim_feature_offsets` and `rim_feature_parameters_actual` per sample.
 
----
+#### `mesh_ops.py`
+- Named refinement targets: C-groove entry/floor/exit, ligament, arm root/neck/corner/end face.
 
-## Changes in v4.0 (Flange geometry addition)
+#### `mesh_feature_diagnostics.py` *(new)*
+- Feature-neighbourhood diagnostics at medium and fine mesh.
+- Reports p90 stress, max stress, median life, min life per feature.
+- Saves JSON for convergence comparison.
 
-### What was changed
+#### `compare_mesh_feature_diagnostics.py` *(new)*
+- Loads medium and fine JSON files.
+- Computes medium-to-fine relative change: linear for p90 stress, log-scale for median life.
+- Convergence criterion: ≤ 15 % for both metrics.
 
-#### 1. `config.py`
-- Added `FLANGE_GEOMETRY_PARAMETERS` (10 new parameters, see below).
-- Added `NOMINAL_FLANGE_MM`, `MIN_FLANGE_OFFSET_MM`, `MAX_FLANGE_OFFSET_MM`.
-- Added `SUBZONE_NAME_TO_ID` (9 subzones: bore, lower_transition, web,
-  upper_transition, rim_main, front_flange, rear_flange, front_shoulder, rear_shoulder).
-- Added `SUBZONE_ID_TO_NAME`, `ZONE_TO_SUBZONE` mappings.
-- Added helper functions: `resolve_flange_parameters()`, `clip_flange_offsets_to_bounds()`,
-  `flange_offset_vector_to_dict()`, `flange_offsets_dict_to_vector()`.
-
-#### 2. `geometry.py`
-- `ContourData` dataclass gains two new fields: `subzone_ids`, `subzone_names`.
-- Added `sanitize_flange_parameters()` — enforces fillet-radius ≤ flange height,
-  total axial extent < 90% of rim thickness, etc.
-- Added `_quarter_arc_points()` — circular arc for 90° fillet corners.
-- Added `_cosine_descent()` — smooth shoulder blend (cosine interpolation).
-- Added `_build_outer_cap_with_flanges()` — constructs the full outer-cap path
-  with front/rear flanges, returning both points and subzone_id arrays.
-- Added `_subzone_by_zone()` — maps zone_id to subzone_id for non-flange points.
-- `build_disc_contour()` now accepts optional `flange_params` dict.
-  If `None`, the legacy flat outer cap is used (backward compatible).
-  If a dict, the new flange outer cap is built and subzone_ids are assigned.
-
-#### 3. `sample_generator.py`
-- `generate_sample()` accepts new `flange_param_offsets` kwarg (default `None` →
-  uses nominal flange values).
-- All three representations (`edge`, `edge_proximity`, `full`) now include:
-  - `subzone_id` (per-node subzone label)
-  - `flange_param_offsets`, `flange_parameters_actual`
-- Contour output now includes `contour_subzone_id` and `subzone_names`.
-
-#### 4. `dataset_generator.py`
-- `generate_dataset()` accepts new `explicit_flange_offsets`, `lhs_min_flange_offsets`,
-  `lhs_max_flange_offsets` kwargs.
-- Flange offsets are sampled by a second independent LHS draw with seed offset +999983.
-- Added `sample_flange_offsets_lhs()`.
-- CLI gains `--flange-list-json`, `--min-flange-offsets-json`, `--max-flange-offsets-json`.
-
-#### 5. `io_hdf5.py`
-- Generator version bumped to `4.0`.
-- File-level datasets added: `nominal_flange_table`, `min_flange_offset_table`,
-  `max_flange_offset_table`, `subzone_name_to_id_mapping`, `zone_to_subzone_mapping`.
-- `write_sample_group()` writes per-sample groups `flange_param_offsets` and
-  `flange_parameters_actual`, plus optional datasets `subzone_id`,
-  `contour_subzone_id`, `subzone_names`.
-
-#### 6. `mesh_ops.py`
-- `generate_mesh()` now computes `r_max_contour` from the actual contour points.
-- When flanges are present (r_max_contour > r5 + 0.5 mm), two additional mesh
-  refinement fields are added:
-  - LC_FILLET refinement at the flange outer radius.
-  - LC_FILLET refinement at the shoulder region (r5 < r < r_max_contour).
-
-#### 7. `validate_fem_nominal.py`
-- Peak stress bounds widened to [300, 800] MPa to accommodate local stress
-  concentrations at the flange shoulder fillets.
-
-#### 8. New: `validate_contour.py`
-- Generates 3–5 diagnostic PNG files:
-  - `contour_comparison.png` — old vs new contour overlay.
-  - `flange_variants.png` — 5 deviated flange parameter variants.
-  - `subzone_labels.png` — subzone colour map on the new contour.
-  - `stress_life_no_flange.png`, `stress_life_with_flanges.png` — FEM stress/life
-    (generated when `--skip-stress` is NOT passed).
-
-### What was NOT changed
-
-- **S-N curves**: `ZONAL_SN_PARAMS` and `UNIFORM_SN_PARAMS` are unchanged.
-  Flanges are in the "rim" zone (zone_id=4) and therefore use the existing rim
-  S-N parameters. No new fatigue law was introduced.
-- **Loading cycle**: `CYCLE_SPEED_FACTORS`, `CYCLE_PHASE_WEIGHTS`, `OMEGA_REF_RAD_S`
-  are unchanged.
-- **FEM physics**: The axisymmetric elasticity solve, boundary conditions, and
-  Palmgren-Miner life computation are unchanged.
-- **Core zone IDs (0-4)**: `ZONE_NAME_TO_ID` is unchanged. All downstream training
-  code that reads `zone_id` continues to work without modification.
-- **Output targets**: `stress_max_vm` and `life_raw` have the same semantics.
-- **HDF5 backward compatibility**: All existing datasets remain; only new datasets
-  and groups are added.
+#### `analyze_locality_probe.py` *(new)*
+- Local feature-neighbourhood stress/life report for nominal and high-feature geometries.
+- Reports feature-vs-baseline comparisons for all 11 feature landmarks.
 
 ---
 
-## New geometry parameters
+## Rim-feature parameters
 
-### FLANGE_GEOMETRY_PARAMETERS
+### RIM_FEATURE_PARAMETERS
 
-All lengths in millimetres (mm). Nominal values defined in `NOMINAL_FLANGE_MM`.
+All lengths in millimetres (mm). Nominal values defined in `NOMINAL_RIM_FEATURE_MM`.
+
+#### Front C-groove parameters
 
 | Parameter | Nominal | Offset range | Description |
 |-----------|---------|-------------|-------------|
-| `front_flange_axial_length` | 3.5 | ±0.30 | Axial depth of front flange (measured inward from front face) |
-| `rear_flange_axial_length` | 3.5 | ±0.30 | Axial depth of rear flange |
-| `front_flange_radial_height` | 2.5 | ±0.20 | Radial height of front flange above r5 |
-| `rear_flange_radial_height` | 2.5 | ±0.20 | Radial height of rear flange above r5 |
-| `front_shoulder_offset` | 1.5 | ±0.20 | Width of shoulder cosine-blend region (front) |
-| `rear_shoulder_offset` | 1.5 | ±0.20 | Width of shoulder cosine-blend region (rear) |
-| `front_fillet_radius` | 1.0 | ±0.10 | Circular-arc fillet at top-front corner of front flange |
-| `rear_fillet_radius` | 1.0 | ±0.10 | Circular-arc fillet at top-rear corner of rear flange |
-| `rim_to_flange_fillet_radius_front` | 0.8 | ±0.10 | Shoulder fillet at inner edge of front flange top |
-| `rim_to_flange_fillet_radius_rear` | 0.8 | ±0.10 | Shoulder fillet at inner edge of rear flange top |
+| `front_cgroove_axial_depth` | 4.0 | ±1.0 | Axial penetration from front face inward |
+| `front_cgroove_radial_span` | 3.0 | ±0.5 | Radial height of groove opening |
+| `front_cgroove_radial_pos` | 0.8 | ±0.2 | r offset of groove bottom above r5 |
+| `front_cgroove_entry_radius` | 0.6 | ±0.15 | Entry fillet radius |
+| `front_cgroove_floor_radius` | 0.6 | ±0.15 | Floor corner fillet radius |
+| `front_cgroove_exit_radius` | 0.6 | ±0.15 | Exit fillet radius |
 
-**Physical constraints** enforced by `sanitize_flange_parameters()`:
-- `front/rear_fillet_radius ≤ 0.45 × front/rear_flange_radial_height`
-- `rim_to_flange_fillet_radius ≤ 0.45 × front/rear_shoulder_offset`
-- `front_flange_axial_length + front_shoulder_offset + rear_flange_axial_length + rear_shoulder_offset ≤ 0.90 × rim_thickness`
+#### Rear drive-arm parameters
 
-**Recommended ranges for realistic discs** (from design intent, not yet validated by FEM):
-- `front/rear_flange_axial_length`: [2.0, 5.0] mm
-- `front/rear_flange_radial_height`: [1.5, 4.0] mm
-- `front/rear_shoulder_offset`: [1.0, 2.5] mm
-- `front/rear_fillet_radius`: [0.5, 1.5] mm
-- `rim_to_flange_fillet_radius_*`: [0.4, 1.2] mm
+| Parameter | Nominal | Offset range | Description |
+|-----------|---------|-------------|-------------|
+| `rear_arm_axial_projection` | 4.0 | ±0.5 | Axial extent of arm beyond rear face |
+| `rear_arm_radial_height` | 5.0 | ±0.4 | Radial height of arm body above r5 |
+| `rear_arm_neck_thickness` | 2.0 | ±0.3 | Radial height of arm neck/root (< radial_height) |
+| `rear_arm_root_radius` | 0.6 | ±0.15 | Root/transition fillet radius |
+| `rear_arm_outer_corner_radius` | 0.6 | ±0.15 | Outer arm corner fillet radius |
+
+**Physical constraints** enforced by `sanitize_rim_feature_parameters()`:
+- neck_thickness < 0.80 × radial_height
+- all fillet radii ≥ 0.30 mm (mesh resolution limit)
+- arm projection < 0.45 × bore_thickness (clearance constraint)
+- C-groove depth ≤ rim_thickness − 2 mm (minimum 2 mm ligament)
+- C-groove radial position + span ≤ arm radial height (groove within arm extent)
 
 ---
 
@@ -235,38 +158,62 @@ refines the existing `zone_id` without replacing it.
 | 1 | lower_transition | lower_transition | Lower fillet zone |
 | 2 | web | web | Web body |
 | 3 | upper_transition | upper_transition | Upper fillet zone |
-| 4 | rim_main | rim | Main outer cap (flat at r = r5) |
-| 5 | front_flange | rim | Front flange face + top + top-corner fillet |
-| 6 | rear_flange | rim | Rear flange face + top + top-corner fillet |
-| 7 | front_shoulder | rim | Shoulder cosine-blend from flange top → r5 (front) |
-| 8 | rear_shoulder | rim | Shoulder cosine-blend from r5 → flange top (rear) |
+| 4 | rim_main | rim | Main rim cap (flat at r = r5) |
+| 5 | front_face | rim | Front axial face above/below C-groove |
+| 6 | front_cgroove | rim | C-groove: entry fillet, walls, floor, exit fillet |
+| 7 | rear_arm_neck | rim | Arm root neck face, shelf, neck top corner |
+| 8 | rear_arm_land | rim | Arm body left face + arm land (horizontal) |
+| 9 | rear_arm_corner | rim | Arm outer corner fillet |
+| 10 | rear_arm_end_face | rim | Arm rear end/load-transfer face |
 
-**For contour points**: assigned during construction in `_build_outer_cap_with_flanges()`.
-
-**For edge / edge_proximity / full-mesh points**: assigned by nearest-contour lookup
-in `generate_sample()`. Interior mesh nodes inherit the subzone of their nearest
-contour point.
+All rim-feature subzones (5–10) inherit zone_id=4 (rim) and the existing rim S-N curve.
 
 ---
 
-## HDF5 schema changes (v4.0, backward compatible)
+## Geometry landmarks
 
-### New file-level datasets
+Landmarks are stored in `ContourData.landmarks_mm` and in the generated sample dict.
 
-| Dataset | dtype | Content |
-|---------|-------|---------|
-| `nominal_flange_table` | S128 | `"key:value"` strings for `NOMINAL_FLANGE_MM` |
-| `min_flange_offset_table` | S128 | Minimum flange offset bounds |
-| `max_flange_offset_table` | S128 | Maximum flange offset bounds |
-| `subzone_name_to_id_mapping` | S64 | `"name:id"` strings |
-| `zone_to_subzone_mapping` | S64 | `"zone_name:subzone_name"` strings |
+| Landmark | Description |
+|----------|-------------|
+| `front_cgroove_entry` | Entry fillet location [x, r] |
+| `front_cgroove_floor` | Floor mid-point [x, r] |
+| `front_cgroove_exit` | Exit fillet location [x, r] |
+| `ligament_reference` | Midpoint of ligament axial path [x, r] |
+| `rear_arm_root` | Arm root / neck corner location [x, r] |
+| `rear_arm_neck` | Mid-neck location [x, r] |
+| `rear_arm_outer_corner` | Outer corner fillet location [x, r] |
+| `rear_arm_load_face_centroid` | End-face centroid [x, r] |
+| `rim_core_reference` | Interior rim reference (x=0, r=r4+40%×rim_height) [x, r] |
+| `lower_transition_start` | Lower fillet start [0, r1] |
+| `upper_transition_start` | Upper fillet start [0, r3] |
+| `blade_arm_face_x_end_mm` | Arm end-face x coordinate [mm] |
+| `blade_arm_face_r_min_mm` | Arm end-face r_min [mm] |
+| `blade_arm_face_r_max_mm` | Arm end-face r_max [mm] |
+
+---
+
+## Blade-equivalent load
+
+The blade-equivalent centrifugal resultant is:
+```
+F = N_blades × m_blade × ω² × r_cg
+  = 60 × 0.003 kg × (4000 rad/s)² × 0.115 m ≈ 331 kN
+```
+Applied as radial distributed traction over the tagged rear arm end face.
+
+**Fixed across all samples** — not LHS-sampled.
+
+---
+
+## HDF5 schema (v5.0, backward compatible)
 
 ### New per-sample groups
 
 | Group | Content |
 |-------|---------|
-| `flange_param_offsets/` | Attributes: per-key flange offset values |
-| `flange_parameters_actual/` | Attributes: per-key actual flange values |
+| `rim_feature_offsets/` | Per-key rim-feature offset values |
+| `rim_feature_parameters_actual/` | Per-key resolved rim-feature values |
 
 ### New per-sample datasets
 
@@ -274,55 +221,71 @@ contour point.
 |---------|-------|-------|-------------|
 | `subzone_id` | int32 | (N,) | Subzone label per sample node |
 | `contour_subzone_id` | int32 | (M,) | Subzone label per contour point |
-| `subzone_names` | S32 | (9,) | Ordered subzone name list |
-
-All existing datasets (`zone_id`, `region_id`, `stress_max_vm`, `life_raw`, etc.)
-are **unchanged**. Existing readers will find all expected datasets in their original
-positions.
+| `subzone_names` | S32 | (11,) | Ordered subzone name list |
 
 ---
 
-## How to regenerate the dataset
+## Mesh configuration
+
+| Setting | Medium | Fine |
+|---------|--------|------|
+| LC_EDGE | 0.50 mm | 0.30 mm |
+| LC_FILLET | 0.30 mm | 0.18 mm |
+| Use case | Production | Validation |
+
+Named local refinement targets:
+- C-groove entry, floor, exit
+- Ligament
+- Rear arm root, neck, outer corner, end face
+- Lower and upper transition boundaries
+
+---
+
+## How to run
 
 ```bash
-# Edge representation, 200 samples, LHS sampling, flanges at nominal+LHS offsets
+# Validate LHS spread for all parameters
+python -m Data_gen.dataset_generator --validate-lhs
+
+# Contour validation plots (fast, no FEM)
+python Data_gen/validate_contour.py --skip-stress
+
+# FEM nominal validation
+python Data_gen/validate_fem_nominal.py
+
+# Example sample plot
+python Data_gen/plot_example_sample.py
+
+# Medium mesh feature diagnostics
+python Data_gen/mesh_feature_diagnostics.py --mesh medium
+
+# Fine mesh feature diagnostics
+python Data_gen/mesh_feature_diagnostics.py --mesh fine
+
+# Medium vs fine convergence comparison
+python Data_gen/compare_mesh_feature_diagnostics.py
+
+# Generate a dataset (200 samples, edge representation)
 python -m Data_gen.dataset_generator \
-    --output-h5 Data_gen/output/disc_dataset_edge_flanged.h5 \
+    --output-h5 Data_gen/output/disc_dataset_edge.h5 \
     --representation edge \
     --include-derivatives \
     --seed 7 \
     --num-samples 200 \
     --lifing-mode zonal
-
-# Edge representation with wider flange offset bounds
-python -m Data_gen.dataset_generator \
-    --output-h5 Data_gen/output/disc_dataset_edge_wide_flanges.h5 \
-    --representation edge \
-    --include-derivatives \
-    --seed 7 \
-    --num-samples 200 \
-    --min-flange-offsets-json /path/to/min_flange.json \
-    --max-flange-offsets-json /path/to/max_flange.json
-
-# Generate contour validation plots
-python -m Data_gen.validate_contour --output-dir Data_gen/output/validation_contour
-
-# Include FEM stress comparison (slow, ~2-5 min per sample)
-python -m Data_gen.validate_contour --output-dir Data_gen/output/validation_contour
 ```
 
-Example `min_flange.json` for wider variation:
-```json
-{
-  "front_flange_axial_length": -1.5,
-  "rear_flange_axial_length": -1.5,
-  "front_flange_radial_height": -1.0,
-  "rear_flange_radial_height": -1.0,
-  "front_shoulder_offset": -0.5,
-  "rear_shoulder_offset": -0.5,
-  "front_fillet_radius": -0.3,
-  "rear_fillet_radius": -0.3,
-  "rim_to_flange_fillet_radius_front": -0.2,
-  "rim_to_flange_fillet_radius_rear": -0.2
-}
-```
+---
+
+## Invariants preserved from earlier versions
+
+- 2-D axisymmetric FEM (solid bore, bore/web/rim family)
+- Core geometry parameters (PUBLIC_GEOMETRY_PARAMETERS, 11 keys)
+- Disc centrifugal body force active in every sample
+- Ti-6Al-4V material (E=114 GPa, ν=0.33, ρ=4430 kg/m³)
+- 7 flight phases, fixed speed factors and phase weights
+- Bore/web/rim zonal S-N behavior (ZONAL_SN_PARAMS)
+- Bore zone shot-peen benefit (high knee stress)
+- Fillet zones steep Basquin slope (slope_high=13)
+- All new C-groove/arm/ligament subzones inherit rim S-N curve (zone_id=4)
+- No temperature field, no new S-N curves, no life multipliers, no target noise

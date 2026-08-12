@@ -698,6 +698,12 @@ def build_disc_contour(
     }
     landmarks_mm.update(rim_feature_points)
 
+    # Override rim_core_reference to be at the interior of the rim section
+    # (x=0, r=r4+40% of rim_height), well away from the arm root and C-groove
+    # stress concentrations, where mesh-independent bulk stress lives.
+    r_rim_core = r4 + 0.40 * (r5 - r4)
+    landmarks_mm["rim_core_reference"] = np.array([0.0, r_rim_core], dtype=np.float64)
+
     metadata = {
         "radial_breaks_mm": radial_breaks,
         "zone_ids_by_break": np.array([
