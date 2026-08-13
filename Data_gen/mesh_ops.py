@@ -27,8 +27,8 @@ from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
 # Mesh size parameters (mm)
 # ---------------------------------------------------------------------------
 LC_BULK   = 2.0   # general interior / web bulk
-LC_EDGE   = 0.8   # uniform shell around the entire contour boundary
-LC_FILLET = 0.5   # fillet / transition zone boundaries (kept finer for stress)
+LC_EDGE   = 0.50
+LC_FILLET = 0.30  # fillet / transition zone boundaries (kept finer for stress)
 LC_BORE   = 1.0   # bore inner face (high hoop stress surface)
 LC_RIM    = 1.2   # rim outer face
 

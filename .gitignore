@@ -60,7 +60,7 @@ ENV/
 *.png
 *.jpg
 *.jpeg
-
+summary*
 
 
 FEM_Val/
