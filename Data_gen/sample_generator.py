@@ -157,9 +157,11 @@ def generate_sample(
     distance_to_contour = mesh.distance_to_contour
 
     # Single axisymmetric FEM solve on the mesh; phases scaled inside the solver.
-    # Pass arm end-face bounds from geometry metadata for precise blade load application.
-    _arm_meta = {k: v for k, v in contour.metadata.items()
-                 if k.startswith("blade_arm_face_")}
+    # Pass rim-top face bounds from geometry metadata for precise blade load application.
+    # The rim-top face (ligament + arm land at r = r5 + h_arm) is the blade-attachment
+    # boundary; the rear drive arm receives no direct blade traction by default.
+    _rim_meta = {k: v for k, v in contour.metadata.items()
+                 if k.startswith("blade_rim_top_")}
     mesh_phase_stress = compute_phase_equivalent_stresses(
         nodes=mesh.nodes,
         zone_ids=mesh_zone_id,
@@ -168,7 +170,7 @@ def generate_sample(
         radial_breaks=radial_breaks,
         mesh_obj=mesh.mesh,
         triangles=mesh.triangles,
-        arm_face_metadata=_arm_meta,
+        rim_face_metadata=_rim_meta,
     )
     fem_failed = not np.any(mesh_phase_stress)  # True if all-zero (FEM failure)
     mesh_stress_max_vm = compute_stress_max(mesh_phase_stress)
@@ -341,7 +343,7 @@ def generate_sample(
     out["lifing_mode"] = lifing_mode
     out["triangles"] = mesh.triangles.astype(np.int32)
     out["blade_equiv_force_N"] = float(blade_equiv_force_n(OMEGA_REF_RAD_S))
-    out["blade_equiv_load_description"] = "annular_blade_mass_centrifugal_surrogate_rear_arm_end_face"
+    out["blade_equiv_load_description"] = "annular_blade_mass_centrifugal_surrogate_rim_top_ligament_arm_land_face"
     out["contour_points_mm"] = contour.points.astype(np.float64)
     out["contour_zone_id"] = contour_zone_id.astype(np.int32)
     out["contour_subzone_id"] = contour.subzone_ids.astype(np.int32)

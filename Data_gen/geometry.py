@@ -170,16 +170,17 @@ def sanitize_rim_feature_parameters(
     rf_floor = out["front_cgroove_floor_radius"]
     rf_exit = out["front_cgroove_exit_radius"]
 
-    # --- Arm radial height: keep modest relative to rim ---
-    h_arm = min(h_arm, 0.45 * t_rim)
+    # --- Arm radial height: keep credible relative to rim ---
+    h_arm = min(h_arm, 0.55 * t_rim)
     h_arm = max(h_arm, 2.0)
 
     # --- Arm neck must be visibly narrower than arm body ---
     neck_t = min(neck_t, h_arm - 1.0)
     neck_t = max(neck_t, 0.8)
 
-    # --- Root radius: must fit in neck face and body face ---
-    rf_root_max = min(0.45 * neck_t, 0.45 * (h_arm - neck_t), 0.45 * rf_root + 0.45)
+    # --- Root radius: must fit in neck face and body face without overlap ---
+    rf_root_max = min(0.45 * neck_t, 0.45 * (h_arm - neck_t))
+    rf_root_max = max(rf_root_max, 0.2)  # guard at minimum meshable fillet
     rf_root = min(rf_root, rf_root_max)
     rf_root = max(rf_root, 0.2)
 
@@ -191,9 +192,9 @@ def sanitize_rim_feature_parameters(
     # Minimum: rf_root (neck-bot) + 0.4 (shelf) + rf_root (body-bot) + rf_root (body-top) + 0.3 (land) + rf_corner
     proj_min = 3.0 * rf_root + 0.4 + 0.3 + rf_corner
     arm_proj = max(arm_proj, proj_min)
-    # Maximum: bore axial half-width minus t_rim/2 minus 0.5mm clearance
-    proj_max = max(0.5 * bore_thickness - 0.5 * t_rim - 0.5, proj_min + 0.1)
-    arm_proj = min(arm_proj, proj_max)
+    # Maximum: generous fixed limit (20 mm ≈ 2.5 × nominal arm projection).
+    # The arm is a rim flange and may project axially beyond the bore half-width.
+    arm_proj = min(arm_proj, 20.0)
 
     # --- C-groove position and span ---
     cg_pos = max(cg_pos, 0.3)
@@ -211,7 +212,7 @@ def sanitize_rim_feature_parameters(
     rf_floor = min(rf_floor, 0.45 * cg_span / 2.0)
     rf_floor = max(rf_floor, 0.15)
 
-    rf_entry = min(rf_entry, 0.45 * cg_pos)
+    rf_entry = min(rf_entry, 0.80 * cg_pos)
     rf_entry = max(rf_entry, 0.15)
 
     rf_exit_max = min(h_arm - cg_pos - cg_span, cg_span) * 0.45
@@ -519,10 +520,12 @@ def _build_outer_cap_cgroove_arm(
         "rear_arm_outer_corner":      np.array([x_arm_end - 0.5*rf_corner, r_arm_top - 0.5*rf_corner], dtype=np.float64),
         "rear_arm_load_face_centroid":np.array([x_arm_end, r_load_face_mid], dtype=np.float64),
         "rim_core_reference":         np.array([x_rear, r5], dtype=np.float64),
-        # Blade traction geometry: arm end face extent
-        "blade_arm_face_x_end_mm":    np.array([x_arm_end], dtype=np.float64),
-        "blade_arm_face_r_min_mm":    np.array([r5], dtype=np.float64),
-        "blade_arm_face_r_max_mm":    np.array([r_arm_top], dtype=np.float64),
+        # Blade traction geometry: rim top (ligament + arm land) at r = r_arm_top.
+        # This is the physically credible blade-attachment surface.
+        # The rear drive arm receives NO direct blade traction by default.
+        "blade_rim_top_r_mm":         np.array([r_arm_top], dtype=np.float64),
+        "blade_rim_top_x_min_mm":     np.array([x_front], dtype=np.float64),
+        "blade_rim_top_x_max_mm":     np.array([x_arm_end], dtype=np.float64),
     }
     return points, subzone, feature_meta
 
@@ -716,12 +719,24 @@ def build_disc_contour(
         "has_rim_features": np.array([rim_feature_params is not None], dtype=bool),
     }
     if rim_feature_params is not None:
+        x_front = -0.5 * t_rim
         x_rear = 0.5 * t_rim
         arm_proj = float(rim_feature_params["rear_arm_axial_projection"])
         h_arm = float(rim_feature_params["rear_arm_radial_height"])
-        metadata["blade_arm_face_x_end_mm"] = np.array([x_rear + arm_proj], dtype=np.float64)
-        metadata["blade_arm_face_r_min_mm"] = np.array([r5], dtype=np.float64)
-        metadata["blade_arm_face_r_max_mm"] = np.array([r5 + h_arm], dtype=np.float64)
+        r_arm_top = r5 + h_arm
+        x_arm_end = x_rear + arm_proj
+        # Blade traction applied to the rim-top face (ligament + arm land at r = r_arm_top).
+        # The rear drive arm end face is NOT the blade-load boundary by default.
+        metadata["blade_rim_top_r_mm"] = np.array([r_arm_top], dtype=np.float64)
+        metadata["blade_rim_top_x_min_mm"] = np.array([x_front], dtype=np.float64)
+        metadata["blade_rim_top_x_max_mm"] = np.array([x_arm_end], dtype=np.float64)
+    else:
+        # Without rim features, apply blade load to the flat outer rim face at r5.
+        x_front = -0.5 * t_rim
+        x_rear = 0.5 * t_rim
+        metadata["blade_rim_top_r_mm"] = np.array([r5], dtype=np.float64)
+        metadata["blade_rim_top_x_min_mm"] = np.array([x_front], dtype=np.float64)
+        metadata["blade_rim_top_x_max_mm"] = np.array([x_rear], dtype=np.float64)
 
     subzone_name_list = list(SUBZONE_NAME_TO_ID.keys())
 
