@@ -180,6 +180,7 @@ def sanitize_rim_feature_parameters(
 
     # --- Root radius: must fit in neck face and body face without overlap ---
     rf_root_max = min(0.45 * neck_t, 0.45 * (h_arm - neck_t))
+    rf_root_max = max(rf_root_max, 0.2)  # guard at minimum meshable fillet
     rf_root = min(rf_root, rf_root_max)
     rf_root = max(rf_root, 0.2)
 
@@ -191,7 +192,8 @@ def sanitize_rim_feature_parameters(
     # Minimum: rf_root (neck-bot) + 0.4 (shelf) + rf_root (body-bot) + rf_root (body-top) + 0.3 (land) + rf_corner
     proj_min = 3.0 * rf_root + 0.4 + 0.3 + rf_corner
     arm_proj = max(arm_proj, proj_min)
-    # Maximum: generous fixed limit; arm is a rim flange and may project beyond bore half-width
+    # Maximum: generous fixed limit (20 mm ≈ 2.5 × nominal arm projection).
+    # The arm is a rim flange and may project axially beyond the bore half-width.
     arm_proj = min(arm_proj, 20.0)
 
     # --- C-groove position and span ---
