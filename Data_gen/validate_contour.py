@@ -1,15 +1,15 @@
-"""Validation plots: old (no-step) vs new (stepped) outer contour.
+"""Validation plots: nominal and asymmetric C-groove / drive-arm outer contour.
 
 Generates diagnostic figures saved to Data_gen/output/validation_contour/:
-  1. contour_comparison.png  – old nominal vs new nominal contour overlay
-  2. step_variants.png     – 4 deviated step variants on the outer-cap region
-  3. stress_contour_old.png  – stress on old-style contour (no steps)
-  4. stress_contour_new.png  – stress on new stepped contour (nominal steps)
-  5. subzone_labels.png      – subzone label colour map on new contour
+  1. contour_comparison.png   – legacy (no features) vs new nominal contour overlay
+  2. cgroove_zoom.png         – front C-groove region zoomed
+  3. arm_zoom.png             – rear drive-arm region zoomed
+  4. subzone_labels.png       – subzone label colour map on new contour
+  5. stress_life_nominal.png  – stress + life on full mesh (nominal geometry)
 
 Usage
 -----
-  python -m Data_gen.validate_contour [--output-dir <dir>]
+  python -m Data_gen.validate_contour [--output-dir <dir>] [--skip-stress]
 """
 
 from __future__ import annotations
@@ -26,12 +26,13 @@ import numpy as np
 
 try:
     from .config import (
-        NOMINAL_GEOMETRY_MM, SUBZONE_NAME_TO_ID, SUBZONE_ID_TO_NAME,
-        resolve_flange_parameters, resolve_geometry_parameters,
-        clip_flange_offsets_to_bounds,
+        NOMINAL_GEOMETRY_MM, NOMINAL_RIM_FEATURE_MM,
+        SUBZONE_NAME_TO_ID, SUBZONE_ID_TO_NAME,
+        resolve_geometry_parameters, resolve_rim_feature_parameters,
+        clip_rim_feature_offsets_to_bounds, radial_stations_from_params,
     )
     from .geometry import (
-        build_disc_contour, sanitize_flange_parameters, sanitize_geometry_parameters,
+        build_disc_contour, sanitize_geometry_parameters, sanitize_rim_feature_parameters,
     )
     from .sample_generator import generate_sample
 except ImportError:
@@ -39,85 +40,76 @@ except ImportError:
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from Data_gen.config import (
-        NOMINAL_GEOMETRY_MM, SUBZONE_NAME_TO_ID, SUBZONE_ID_TO_NAME,
-        resolve_flange_parameters, resolve_geometry_parameters,
-        clip_flange_offsets_to_bounds,
+        NOMINAL_GEOMETRY_MM, NOMINAL_RIM_FEATURE_MM,
+        SUBZONE_NAME_TO_ID, SUBZONE_ID_TO_NAME,
+        resolve_geometry_parameters, resolve_rim_feature_parameters,
+        clip_rim_feature_offsets_to_bounds, radial_stations_from_params,
     )
     from Data_gen.geometry import (
-        build_disc_contour, sanitize_flange_parameters, sanitize_geometry_parameters,
+        build_disc_contour, sanitize_geometry_parameters, sanitize_rim_feature_parameters,
     )
     from Data_gen.sample_generator import generate_sample
 
 
-# Colour map for subzone labels
 SUBZONE_COLOURS = {
-    "bore":             "#4e79a7",
-    "lower_transition": "#f28e2b",
-    "web":              "#59a14f",
-    "upper_transition": "#e15759",
-    "rim_main":         "#76b7b2",
-    "front_step":     "#edc948",
-    "rear_step":      "#b07aa1",
-    "front_shoulder":   "#ff9da7",
-    "rear_shoulder":    "#9c755f",
-    "front_groove":     "#bab0ac",
-    "rear_platform":    "#d37295",
-    "rear_platform_root": "#8cd17d",
+    "bore":               "#4e79a7",
+    "lower_transition":   "#f28e2b",
+    "web":                "#59a14f",
+    "upper_transition":   "#e15759",
+    "rim_main":           "#76b7b2",
+    "front_face":         "#edc948",
+    "front_cgroove":      "#b07aa1",
+    "rear_arm_neck":      "#ff9da7",
+    "rear_arm_land":      "#9c755f",
+    "rear_arm_corner":    "#bab0ac",
+    "rear_arm_end_face":  "#d37295",
 }
 
 
-def _get_params_and_steps(geo_offsets=None, flange_offsets=None):
+def _get_params_and_rim_features(geo_offsets=None, rf_offsets=None):
     params = sanitize_geometry_parameters(resolve_geometry_parameters(geo_offsets or {}))
-    fp_raw = resolve_flange_parameters(flange_offsets or {})
-    fp = sanitize_flange_parameters(fp_raw, params["rim_thickness"])
-    return params, fp
+    rf_raw = resolve_rim_feature_parameters(rf_offsets or {})
+    rf = sanitize_rim_feature_parameters(rf_raw, params["rim_thickness"], params["bore_thickness"])
+    return params, rf
 
 
 def plot_contour_comparison(out_dir: Path) -> None:
-    """Figure 1: old (no-step) vs new (stepped) contour overlay."""
-    params, fp = _get_params_and_steps()
+    """Figure 1: legacy (no rim features) vs new (C-groove + arm) contour overlay."""
+    params, rf = _get_params_and_rim_features()
 
-    contour_old = build_disc_contour(params, flange_params=None)
-    contour_new = build_disc_contour(params, flange_params=fp)
+    contour_old = build_disc_contour(params, rim_feature_params=None)
+    contour_new = build_disc_contour(params, rim_feature_params=rf)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 7))
 
-    # Left: full disc contour
     ax = axes[0]
     ax.plot(contour_old.points[:, 0], contour_old.points[:, 1],
-            "b-", lw=1.2, label="No steps (old)")
+            "b-", lw=1.2, label="Legacy (flat cap)")
     ax.plot(contour_new.points[:, 0], contour_new.points[:, 1],
-            "r--", lw=1.5, label="With steps (new)")
+            "r--", lw=1.5, label="New (C-groove + drive arm)")
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("x [mm] (axial)")
     ax.set_ylabel("r [mm] (radial)")
-    ax.set_title("Full disc contour comparison\n(bore/web/rim zones unchanged)")
+    ax.set_title("Full disc contour: legacy vs new\n(bore/web/rim zones unchanged)")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
-    # Right: zoom on outer rim region
     ax2 = axes[1]
-    # Determine rim region bounds
-    from Data_gen.config import radial_stations_from_params
     rb = radial_stations_from_params(params)
     r4, r5 = float(rb[4]), float(rb[5])
-    r_step_outer = float(contour_new.landmarks_mm["r_step_outer"][0])
-
     mask_old = contour_old.points[:, 1] > r4 - 2.0
     mask_new = contour_new.points[:, 1] > r4 - 2.0
-
     ax2.plot(contour_old.points[mask_old, 0], contour_old.points[mask_old, 1],
-             "b-", lw=1.5, label="No steps (old)")
+             "b-", lw=1.5, label="Legacy")
     ax2.plot(contour_new.points[mask_new, 0], contour_new.points[mask_new, 1],
-             "r--", lw=2.0, label="With steps (new)")
+             "r--", lw=2.0, label="New")
     ax2.set_aspect("equal", adjustable="box")
     ax2.set_xlabel("x [mm] (axial)")
     ax2.set_ylabel("r [mm] (radial)")
-    ax2.set_title("Outer rim region (zoom)\nsteps visible at r > r5")
+    ax2.set_title("Outer rim region (zoom)\nC-groove on front side, drive arm on rear")
     ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
     ax2.axhline(r5, color="gray", ls=":", lw=0.8, label=f"r5={r5:.1f}")
-    ax2.axhline(r_step_outer, color="orange", ls=":", lw=0.8, label=f"r_step={r_step_outer:.1f}")
     ax2.legend(fontsize=8)
 
     fig.tight_layout()
@@ -127,60 +119,108 @@ def plot_contour_comparison(out_dir: Path) -> None:
     print(f"Saved: {out_dir/'contour_comparison.png'}")
 
 
-def plot_step_variants(out_dir: Path) -> None:
-    """Figure 2: outer-cap region for nominal + 4 deviated variants + 1 asymmetric variant."""
-    params, fp_nom = _get_params_and_steps()
-
-    # Define some deviated variants (within the nominal ± offset bounds).
-    # Last variant is deliberately asymmetric (front != rear).
-    variants = {
-        "nominal":              {},
-        "+fl_height+0.2":       {"front_flange_radial_height": +0.2, "rear_flange_radial_height": +0.2},
-        "-fl_height-0.2":       {"front_flange_radial_height": -0.2, "rear_flange_radial_height": -0.2},
-        "+fl_axial+0.3":        {"front_flange_axial_length": +0.3, "rear_flange_axial_length": +0.3},
-        "+fillet+0.1":          {"front_fillet_radius": +0.1, "rear_fillet_radius": +0.1},
-        "asymmetric":           {
-            "front_flange_radial_height": +0.15,
-            "rear_flange_radial_height":  -0.15,
-            "front_flange_axial_length":  +0.20,
-            "rear_flange_axial_length":   -0.20,
-        },
+def plot_cgroove_zoom(out_dir: Path) -> None:
+    """Figure 2: Front C-groove zoom (nominal + asymmetric variant)."""
+    params, rf_nom = _get_params_and_rim_features()
+    asym_rf_offs = {
+        "front_cgroove_axial_depth":  +0.80,
+        "front_cgroove_radial_span":  +0.40,
+        "front_cgroove_entry_radius": +0.10,
+        "front_cgroove_floor_radius": +0.10,
     }
+    _, rf_asym = _get_params_and_rim_features(rf_offsets=clip_rim_feature_offsets_to_bounds(asym_rf_offs))
 
-    from Data_gen.config import radial_stations_from_params
+    contour_nom  = build_disc_contour(params, rim_feature_params=rf_nom)
+    contour_asym = build_disc_contour(params, rim_feature_params=rf_asym)
+
     rb = radial_stations_from_params(params)
-    r4 = float(rb[4])
+    r5 = float(rb[5])
     t_rim = float(params["rim_thickness"])
+    x_front = -0.5 * t_rim
 
-    fig, axes = plt.subplots(1, len(variants), figsize=(4 * len(variants), 5), sharey=True)
-    colours = ["k", "royalblue", "tomato", "seagreen", "darkorange"]
-
-    for ax, (label, offs), colour in zip(axes, variants.items(), colours):
-        fp = sanitize_flange_parameters(
-            resolve_flange_parameters(clip_flange_offsets_to_bounds(offs)),
-            t_rim,
-        )
-        contour = build_disc_contour(params, flange_params=fp)
-        mask = contour.points[:, 1] > r4 - 1.0
-        ax.plot(contour.points[mask, 0], contour.points[mask, 1], color=colour, lw=1.5)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6), sharey=True)
+    for ax, (label, contour) in zip(axes, [("Nominal", contour_nom), ("Asymmetric +groove", contour_asym)]):
+        pts = contour.points
+        mask = (pts[:, 1] > r5 - 0.5) & (pts[:, 0] < x_front + 8.0) & (pts[:, 0] > x_front - 0.5)
+        ax.plot(pts[mask, 0], pts[mask, 1], "k.-", lw=1.5, ms=4)
+        for key, colour in [
+            ("front_cgroove_entry", "tab:blue"),
+            ("front_cgroove_floor", "tab:red"),
+            ("front_cgroove_exit",  "tab:green"),
+            ("ligament_reference",  "tab:orange"),
+        ]:
+            if key in contour.landmarks_mm:
+                p = contour.landmarks_mm[key]
+                ax.plot(p[0], p[1], "o", color=colour, ms=9, label=key, zorder=5)
         ax.set_aspect("equal", adjustable="box")
-        ax.set_title(label, fontsize=8)
+        ax.set_title(f"Front C-groove ({label})")
         ax.set_xlabel("x [mm]")
+        ax.legend(fontsize=7, loc="lower right")
         ax.grid(True, alpha=0.3)
+        ax.axvline(x_front, color="gray", ls=":", lw=0.8)
 
     axes[0].set_ylabel("r [mm]")
-    fig.suptitle("Outer-cap step variants (rim region, r > r4)", fontsize=11)
     fig.tight_layout()
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_dir / "step_variants.png", dpi=180)
+    fig.savefig(out_dir / "cgroove_zoom.png", dpi=180)
     plt.close(fig)
-    print(f"Saved: {out_dir/'step_variants.png'}")
+    print(f"Saved: {out_dir/'cgroove_zoom.png'}")
+
+
+def plot_arm_zoom(out_dir: Path) -> None:
+    """Figure 3: Rear drive-arm zoom (nominal + asymmetric variant)."""
+    params, rf_nom = _get_params_and_rim_features()
+    asym_rf_offs = {
+        "rear_arm_axial_projection":    +0.40,
+        "rear_arm_radial_height":       +0.30,
+        "rear_arm_neck_thickness":      -0.20,
+        "rear_arm_root_radius":         +0.10,
+        "rear_arm_outer_corner_radius": +0.10,
+    }
+    _, rf_asym = _get_params_and_rim_features(rf_offsets=clip_rim_feature_offsets_to_bounds(asym_rf_offs))
+
+    contour_nom  = build_disc_contour(params, rim_feature_params=rf_nom)
+    contour_asym = build_disc_contour(params, rim_feature_params=rf_asym)
+
+    rb = radial_stations_from_params(params)
+    r5 = float(rb[5])
+    t_rim = float(params["rim_thickness"])
+    x_rear = 0.5 * t_rim
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6), sharey=True)
+    for ax, (label, contour) in zip(axes, [("Nominal", contour_nom), ("Asymmetric +arm", contour_asym)]):
+        pts = contour.points
+        mask = (pts[:, 1] > r5 - 1.0) & (pts[:, 0] > x_rear - 2.0)
+        ax.plot(pts[mask, 0], pts[mask, 1], "k.-", lw=1.5, ms=4)
+        for key, colour in [
+            ("rear_arm_root",              "tab:blue"),
+            ("rear_arm_neck",              "tab:cyan"),
+            ("rear_arm_outer_corner",      "tab:red"),
+            ("rear_arm_load_face_centroid","tab:purple"),
+            ("rim_core_reference",         "tab:gray"),
+        ]:
+            if key in contour.landmarks_mm:
+                p = contour.landmarks_mm[key]
+                ax.plot(p[0], p[1], "o", color=colour, ms=9, label=key, zorder=5)
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_title(f"Rear drive arm ({label})")
+        ax.set_xlabel("x [mm]")
+        ax.legend(fontsize=7, loc="lower left")
+        ax.grid(True, alpha=0.3)
+        ax.axvline(x_rear, color="gray", ls=":", lw=0.8)
+
+    axes[0].set_ylabel("r [mm]")
+    fig.tight_layout()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_dir / "arm_zoom.png", dpi=180)
+    plt.close(fig)
+    print(f"Saved: {out_dir/'arm_zoom.png'}")
 
 
 def plot_subzone_labels(out_dir: Path) -> None:
-    """Figure 3: subzone label colour map on the new contour."""
-    params, fp = _get_params_and_steps()
-    contour = build_disc_contour(params, flange_params=fp)
+    """Figure 4: subzone label colour map on the new contour."""
+    params, rf = _get_params_and_rim_features()
+    contour = build_disc_contour(params, rim_feature_params=rf)
 
     fig, ax = plt.subplots(figsize=(9, 7))
     pts = contour.points
@@ -199,7 +239,7 @@ def plot_subzone_labels(out_dir: Path) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("x [mm] (axial)")
     ax.set_ylabel("r [mm] (radial)")
-    ax.set_title("Contour coloured by subzone_id")
+    ax.set_title("Contour coloured by subzone_id\n(C-groove + rear arm geometry)")
     ax.legend(handles=legend_handles, fontsize=8, loc="upper right")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -210,172 +250,46 @@ def plot_subzone_labels(out_dir: Path) -> None:
 
 
 def plot_stress_comparison(out_dir: Path) -> None:
-    """Figures 4 & 5: stress on outer contour, no-step vs stepped."""
+    """Figure 5: stress + life on full mesh (nominal geometry)."""
     import matplotlib.tri as mtri
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for label, kwargs in [
-        ("no_flanges",    {"use_flanges": False}),
-        ("with_flanges", {"use_flanges": True, "flange_param_offsets": {}}),
-    ]:
-        print(f"  Generating {label} full sample for stress plot...")
-        s = generate_sample(
-            param_offsets={},
-            representation="full",
-            seed=0,
-            include_derivatives=False,
-            **kwargs,
-        )
-        nodes = s["node_coords_mm"]
-        tris  = s["triangles"]
-        stress = s["stress_max_vm"]
-
-        triang = mtri.Triangulation(nodes[:, 0], nodes[:, 1], tris)
-        fig, axes = plt.subplots(1, 2, figsize=(13, 6))
-
-        tcf = axes[0].tripcolor(triang, stress, cmap="inferno", shading="gouraud")
-        axes[0].set_title(f"stress_max_vm [{label}]\npeak={np.max(stress):.1f} MPa")
-        axes[0].set_aspect("equal", adjustable="box")
-        axes[0].set_xlabel("x [mm]"); axes[0].set_ylabel("r [mm]")
-        fig.colorbar(tcf, ax=axes[0], fraction=0.046, label="von Mises [MPa]")
-
-        life_log = np.log10(np.maximum(s["life_raw"], 1e-6))
-        tcf2 = axes[1].tripcolor(triang, life_log, cmap="viridis", shading="gouraud")
-        axes[1].set_title(f"log10(life_raw) [{label}]")
-        axes[1].set_aspect("equal", adjustable="box")
-        axes[1].set_xlabel("x [mm]"); axes[1].set_ylabel("r [mm]")
-        fig.colorbar(tcf2, ax=axes[1], fraction=0.046, label="log10(cycles)")
-
-        fig.tight_layout()
-        fname = out_dir / f"stress_life_{label}.png"
-        fig.savefig(fname, dpi=180)
-        plt.close(fig)
-        print(f"Saved: {fname}")
-
-
-def plot_zoomed_steps(out_dir: Path) -> None:
-    """Figure: zoomed views of front and rear step regions (nominal + asymmetric)."""
-    params, fp_nom = _get_params_and_steps()
-
-    # Asymmetric variant
-    asym_offs = {
-        "front_flange_radial_height": +0.15,
-        "rear_flange_radial_height":  -0.15,
-        "front_flange_axial_length":  +0.20,
-        "rear_flange_axial_length":   -0.20,
-    }
-    t_rim = float(params["rim_thickness"])
-    fp_asym = sanitize_flange_parameters(
-        resolve_flange_parameters(clip_flange_offsets_to_bounds(asym_offs)),
-        t_rim,
+    print("  Generating nominal full sample for stress/life plot...")
+    s = generate_sample(
+        param_offsets={},
+        representation="full",
+        seed=0,
+        include_derivatives=False,
     )
+    nodes = s["node_coords_mm"]
+    tris  = s["triangles"]
+    stress = s["stress_max_vm"]
+    life_log = np.log10(np.maximum(s["life_raw"], 1e-6))
 
-    contour_nom  = build_disc_contour(params, flange_params=fp_nom)
-    contour_asym = build_disc_contour(params, flange_params=fp_asym)
-
-    from Data_gen.config import radial_stations_from_params
-    rb = radial_stations_from_params(params)
-    r4, r5 = float(rb[4]), float(rb[5])
-    x_front = -0.5 * t_rim
-    x_rear  = +0.5 * t_rim
-
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-
-    for row_idx, (label, contour) in enumerate([("Nominal", contour_nom), ("Asymmetric", contour_asym)]):
-        pts = contour.points
-        rim_mask = pts[:, 1] > r4 - 1.0
-
-        for col_idx, (side, x_center) in enumerate([("Front", x_front), ("Rear", x_rear)]):
-            ax = axes[row_idx, col_idx]
-            margin_x = 4.0
-            margin_r = 1.0
-            r_max = float(pts[:, 1].max()) + margin_r
-            mask = rim_mask & (pts[:, 0] >= x_center - margin_x) & (pts[:, 0] <= x_center + margin_x)
-            ax.plot(pts[mask, 0], pts[mask, 1], "k-", lw=1.5)
-            ax.axhline(r5, color="blue", ls=":", lw=0.8, alpha=0.7, label=f"r5={r5:.1f}")
-            ax.axhline(r_max - margin_r, color="orange", ls=":", lw=0.8, alpha=0.7)
-            ax.axvline(x_center, color="red", ls="--", lw=0.8, alpha=0.6, label=f"x={x_center:.1f}")
-            ax.set_xlim(x_center - margin_x, x_center + margin_x)
-            ax.set_ylim(r5 - 1.0, r_max)
-            ax.set_title(f"{label} / {side} step (zoomed)", fontsize=9)
-            ax.set_xlabel("x [mm]")
-            ax.set_ylabel("r [mm]")
-            ax.legend(fontsize=7)
-            ax.set_aspect("equal", adjustable="box")
-            ax.grid(True, alpha=0.3)
-
-    fig.tight_layout()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_dir / "step_zoom.png", dpi=180)
-    plt.close(fig)
-    print(f"Saved: {out_dir/'step_zoom.png'}")
-
-
-def plot_rim_feature_zoom(out_dir: Path) -> None:
-    """Figure: zoomed + labelled views of the front relief groove and the rear
-    blade-platform collar (nominal geometry), annotated with feature landmarks."""
-    params, fp = _get_params_and_steps()
-    contour = build_disc_contour(params, flange_params=fp)
-    pts = contour.points
-
-    from Data_gen.config import radial_stations_from_params
-    rb = radial_stations_from_params(params)
-    r5 = float(rb[5])
-    t_rim = float(params["rim_thickness"])
-    x_front = -0.5 * t_rim
-    x_rear = +0.5 * t_rim
-
+    triang = mtri.Triangulation(nodes[:, 0], nodes[:, 1], tris)
     fig, axes = plt.subplots(1, 2, figsize=(13, 6))
 
-    # --- Left: front relief groove, zoomed ---
-    ax = axes[0]
-    mask = (pts[:, 1] > r5 - 0.5) & (pts[:, 0] < x_front + 6.0) & (pts[:, 0] > x_front - 0.5)
-    ax.plot(pts[mask, 0], pts[mask, 1], "k.-", lw=1.5, ms=3)
-    for key, colour in [
-        ("front_groove_entry", "tab:blue"),
-        ("front_groove_floor", "tab:red"),
-        ("front_groove_exit", "tab:green"),
-        ("front_outer_corner", "tab:orange"),
-    ]:
-        if key in contour.landmarks_mm:
-            p = contour.landmarks_mm[key]
-            ax.plot(p[0], p[1], "o", color=colour, ms=8, label=key)
-    ax.set_aspect("equal", adjustable="box")
-    ax.set_title("Front relief groove (zoomed)")
-    ax.set_xlabel("x [mm]")
-    ax.set_ylabel("r [mm]")
-    ax.legend(fontsize=7, loc="lower right")
-    ax.grid(True, alpha=0.3)
+    tcf = axes[0].tripcolor(triang, stress, cmap="inferno", shading="gouraud")
+    axes[0].set_title(f"stress_max_vm [nominal]\npeak={np.max(stress):.1f} MPa")
+    axes[0].set_aspect("equal", adjustable="box")
+    axes[0].set_xlabel("x [mm]"); axes[0].set_ylabel("r [mm]")
+    fig.colorbar(tcf, ax=axes[0], fraction=0.046, label="von Mises [MPa]")
 
-    # --- Right: rear blade-platform collar, zoomed ---
-    ax2 = axes[1]
-    mask2 = (pts[:, 1] > r5 - 1.0) & (pts[:, 0] > x_rear - 8.0)
-    ax2.plot(pts[mask2, 0], pts[mask2, 1], "k.-", lw=1.5, ms=3)
-    for key, colour in [
-        ("rear_platform_root_pt", "tab:blue"),
-        ("rear_platform_land_pt", "tab:red"),
-        ("rear_platform_outer_corner", "tab:green"),
-        ("rear_platform_load_face_centroid", "tab:purple"),
-    ]:
-        if key in contour.landmarks_mm:
-            p = contour.landmarks_mm[key]
-            ax2.plot(p[0], p[1], "o", color=colour, ms=8, label=key)
-    ax2.set_aspect("equal", adjustable="box")
-    ax2.set_title("Rear blade-platform collar (zoomed)\n(load-transfer face = blade centrifugal traction)")
-    ax2.set_xlabel("x [mm]")
-    ax2.set_ylabel("r [mm]")
-    ax2.legend(fontsize=7, loc="lower left")
-    ax2.grid(True, alpha=0.3)
+    tcf2 = axes[1].tripcolor(triang, life_log, cmap="viridis", shading="gouraud")
+    axes[1].set_title("log10(life_raw) [nominal, zonal S-N]")
+    axes[1].set_aspect("equal", adjustable="box")
+    axes[1].set_xlabel("x [mm]"); axes[1].set_ylabel("r [mm]")
+    fig.colorbar(tcf2, ax=axes[1], fraction=0.046, label="log10(cycles)")
 
     fig.tight_layout()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_dir / "rim_feature_zoom.png", dpi=180)
+    fname = out_dir / "stress_life_nominal.png"
+    fig.savefig(fname, dpi=180)
     plt.close(fig)
-    print(f"Saved: {out_dir/'rim_feature_zoom.png'}")
+    print(f"Saved: {fname}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Validate old vs new disc contour with steps.")
+    parser = argparse.ArgumentParser(description="Validate C-groove + drive-arm contour.")
     parser.add_argument("--output-dir", type=Path,
                         default=Path("Data_gen/output/validation_contour"))
     parser.add_argument("--skip-stress", action="store_true",
@@ -386,10 +300,9 @@ def main() -> None:
     print(f"Output directory: {out_dir}")
 
     plot_contour_comparison(out_dir)
-    plot_step_variants(out_dir)
+    plot_cgroove_zoom(out_dir)
+    plot_arm_zoom(out_dir)
     plot_subzone_labels(out_dir)
-    plot_zoomed_steps(out_dir)
-    plot_rim_feature_zoom(out_dir)
 
     if not args.skip_stress:
         print("Generating FEM stress comparison plots (this takes 1-3 min each)...")

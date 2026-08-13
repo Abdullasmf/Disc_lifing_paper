@@ -106,29 +106,25 @@ def _strain_components(u, w):
     return e_xx, e_rr, e_tt, e_xr
 
 
-def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray | None = None):
+def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray | None = None,
+                        arm_face_x_end_m: float | None = None,
+                        arm_face_r_min_m: float | None = None,
+                        arm_face_r_max_m: float | None = None):
     """Assemble and solve the axisymmetric elasticity system at angular speed omega.
 
     Coordinates of ``mesh`` are expected in METRES.  Returns nodal stress
     components (sxx, srr, stt, sxr) in Pa together with the global basis used.
 
     In addition to the centrifugal body load, a blade-equivalent centrifugal
-    force (see :func:`blade_equiv_force_n`) is applied as a radial traction
-    on the rear platform load-transfer face.  This face is the vertical
-    boundary segment at the maximum-x edge of the rim, spanning from the
-    upper-transition/rim boundary (r4) up through the top of the rear
-    platform collar (r5 + platform height).  The plain rim wall (r4..r5) is
-    geometrically flush (same x) with the platform's own vertical face
-    (r5..r5+h_r-rf_r), so both are included as a single contiguous loaded
-    boundary — applying the traction only above r5 would introduce an
-    artificial traction discontinuity (and an associated spurious stress
-    singularity) right at the r5 junction, since the two segments are
-    perfectly collinear.  Facets are selected using an near-zero delta-x
-    ("vertical") criterion combined with x-proximity to the local x-max,
-    which cleanly excludes the rear platform's horizontal land / outer
-    corner fillet / shoulder facets even though they share similar x values.
-    If *radial_breaks_m* is not supplied the rim/upper-transition boundary is
-    approximated from the mesh's radial extent.
+    force (see :func:`blade_equiv_force_n`) is applied as a radial traction on
+    the rear drive-arm end/load face — the finite vertical boundary at
+    x = arm_face_x_end_m, spanning r in [arm_face_r_min_m, arm_face_r_max_m].
+
+    When arm_face_x_end_m/r_min_m/r_max_m are provided (from geometry metadata),
+    the arm end face is selected precisely by those bounds.  When they are omitted,
+    a fallback selects the rightmost nearly-vertical boundary facets in the rim zone
+    (r >= r4), which correctly identifies the arm end face in normal use because the
+    arm end face IS the maximum-x rim surface.
     """
     C = _axisymmetric_C() * 1e6  # MPa -> Pa for a fully SI solve
 
@@ -139,8 +135,6 @@ def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray
     def stiffness(u, v, w):
         eu = _strain_components(u, w)
         ev = _strain_components(v, w)
-        # sigma = C : eu  ; integrand = ev : sigma, integrated with axisymmetric
-        # measure 2*pi*r dA (the constant 2*pi cancels and is dropped).
         r = w.x[1]
         sig = [sum(C[i, j] * eu[j] for j in range(4)) for i in range(4)]
         integrand = sum(ev[i] * sig[i] for i in range(4))
@@ -157,37 +151,41 @@ def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray
     K = stiffness.assemble(basis)
     f = body_load.assemble(basis)
 
-    # --- Blade-equivalent centrifugal traction on the rear platform face ---
+    # --- Blade-equivalent centrifugal traction on the rear arm end face ---
     f_total = blade_equiv_force_n(omega)  # [N]
-    if radial_breaks_m is not None and len(radial_breaks_m) > 4:
-        r4_m = float(radial_breaks_m[4])
-    else:
-        # Fallback: approximate the rim zone as the outer ~20mm of radial extent.
-        r4_m = float(mesh.p[1].max()) - 0.020
 
-    # Restrict candidate vertices to the rim zone (r >= r4) then take the
-    # local x-max: this is the flush rear wall/platform x position, distinct
-    # from the (generally larger) global mesh x-max at the bore.
-    rim_zone_mask = mesh.p[1] >= r4_m * 0.95
-    if np.any(rim_zone_mask):
-        x_rear_m = float(mesh.p[0, rim_zone_mask].max())
-    else:
-        x_rear_m = float(mesh.p[0].max())
-
-    bf_ids = mesh.boundary_facets()  # indices into mesh.facets columns
+    bf_ids = mesh.boundary_facets()
     if bf_ids.size > 0:
         fv_x = mesh.p[0, mesh.facets[:, bf_ids]]  # (2, n_bf)
         fv_r = mesh.p[1, mesh.facets[:, bf_ids]]  # (2, n_bf)
         mid_x = fv_x.mean(axis=0)
         mid_r = fv_r.mean(axis=0)
         dx = np.abs(fv_x[0] - fv_x[1])
-        x_tol = 5e-4  # 0.5 mm tolerance in metres
-        vert_tol = 1e-6  # near-zero delta-x => a (near-)vertical facet
-        rear_mask = (
-            (dx < vert_tol)
-            & (mid_x > x_rear_m - x_tol)
-            & (mid_r >= r4_m * 0.95)
-        )
+        x_tol = 5e-4   # 0.5 mm tolerance in metres
+        vert_tol = 1e-6  # near-zero delta-x => (near-)vertical facet
+
+        if arm_face_x_end_m is not None and arm_face_r_min_m is not None and arm_face_r_max_m is not None:
+            # Precise geometry-tagged selection: arm end face bounded by [x_end, r_min, r_max].
+            rear_mask = (
+                (dx < vert_tol)
+                & (mid_x > arm_face_x_end_m - x_tol)
+                & (mid_r >= arm_face_r_min_m - x_tol)
+                & (mid_r <= arm_face_r_max_m + x_tol)
+            )
+        else:
+            # Fallback: rightmost nearly-vertical facets in the rim zone.
+            if radial_breaks_m is not None and len(radial_breaks_m) > 4:
+                r4_m = float(radial_breaks_m[4])
+            else:
+                r4_m = float(mesh.p[1].max()) - 0.020
+            rim_zone_mask = mesh.p[1] >= r4_m * 0.95
+            x_rear_m = float(mesh.p[0, rim_zone_mask].max()) if np.any(rim_zone_mask) else float(mesh.p[0].max())
+            rear_mask = (
+                (dx < vert_tol)
+                & (mid_x > x_rear_m - x_tol)
+                & (mid_r >= r4_m * 0.95)
+            )
+
         rear_facets = bf_ids[rear_mask]
     else:
         rear_facets = np.empty(0, dtype=int)
@@ -195,7 +193,7 @@ def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray
     if rear_facets.size > 0 and f_total > 0.0:
         fb = FacetBasis(mesh, element, facets=rear_facets)
 
-        # Traction t_r [Pa] such that integral(t_r * 2*pi*r * ds) = f_total,
+        # Traction t_r [Pa] s.t. integral(t_r * 2*pi*r * ds) = f_total,
         # approximated with the mean radius and total arc length of the face.
         r_face_mid = float(mid_r[rear_mask].mean())
         dv = mesh.p[:, mesh.facets[0, rear_facets]] - mesh.p[:, mesh.facets[1, rear_facets]]
@@ -213,18 +211,16 @@ def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray
 
         f = f + blade_traction.assemble(fb)
     elif f_total > 0.0:
-        logger.warning("Blade-equivalent load requested but no rear platform facets were found; load not applied.")
+        logger.warning("Blade-equivalent load requested but no rear arm end-face facets were found; load not applied.")
 
     # BC: fix the single node closest to the bore inner-face midpoint in x only.
-    # Bore inner face is the minimum-radius surface; midpoint is at x=0.
-    coords = mesh.p  # (2, nverts) in metres
+    coords = mesh.p
     r_min = coords[1].min()
     target = np.array([0.0, r_min])
     dist = np.linalg.norm(coords.T - target[None, :], axis=1)
     fixed_vertex = int(np.argmin(dist))
 
-    # Map that vertex to the x-DOF of the vector P2 basis.
-    dofs = basis.nodal_dofs  # shape (2, nverts): row 0 -> x dof, row 1 -> r dof
+    dofs = basis.nodal_dofs
     fixed_dof = int(dofs[0, fixed_vertex])
 
     x = solve(*condense(K, f, D=np.array([fixed_dof]), x=np.zeros(basis.N)))
@@ -295,6 +291,7 @@ def compute_phase_equivalent_stresses(
     radial_breaks: np.ndarray,
     mesh_obj,
     triangles: np.ndarray,
+    arm_face_metadata: Dict[str, np.ndarray] | None = None,
 ) -> np.ndarray:
     """Axisymmetric FEM von Mises stress field scaled across the 7 flight phases.
 
@@ -303,29 +300,47 @@ def compute_phase_equivalent_stresses(
     nodes:
         (N, 2) array [x, r] in MILLIMETRES (the mesh vertex coordinates).
     zone_ids, region_ids:
-        (N,) int32 zone/region labels (unused by the FEM solve, kept for the
-        stable call signature and possible diagnostics).
+        (N,) int32 zone/region labels.
     geometry_params, radial_breaks:
-        Geometry description, used only for diagnostic logging on failure.
+        Geometry description used for diagnostics.
     mesh_obj:
         The ``skfem.MeshTri`` from :class:`mesh_ops.MeshData`, coordinates in mm.
     triangles:
-        (T, 3) connectivity (kept for signature stability; mesh_obj carries it).
+        (T, 3) connectivity (kept for signature stability).
+    arm_face_metadata : dict or None
+        Optional geometry-tagged arm face coordinates from ``ContourData.metadata``.
+        Expected keys: ``blade_arm_face_x_end_mm``, ``blade_arm_face_r_min_mm``,
+        ``blade_arm_face_r_max_mm``.  When present, the blade traction is applied
+        precisely to the tagged arm end face rather than via a radial threshold.
 
     Returns
     -------
-    (N, 7) float64 array of von Mises stress per flight phase, in MPa.  On FEM
-    failure a zero array of this shape is returned so generation can continue.
+    (N, 7) float64 array of von Mises stress per flight phase, in MPa.
     """
     n_nodes = nodes.shape[0]
     n_phases = CYCLE_SPEED_FACTORS.shape[0]
 
+    # Extract arm face bounds from metadata for precise traction application.
+    arm_face_x_end_m = None
+    arm_face_r_min_m = None
+    arm_face_r_max_m = None
+    if arm_face_metadata is not None:
+        if "blade_arm_face_x_end_mm" in arm_face_metadata:
+            arm_face_x_end_m = float(arm_face_metadata["blade_arm_face_x_end_mm"][0]) * 1e-3
+        if "blade_arm_face_r_min_mm" in arm_face_metadata:
+            arm_face_r_min_m = float(arm_face_metadata["blade_arm_face_r_min_mm"][0]) * 1e-3
+        if "blade_arm_face_r_max_mm" in arm_face_metadata:
+            arm_face_r_max_m = float(arm_face_metadata["blade_arm_face_r_max_mm"][0]) * 1e-3
+
     try:
-        # Solve in SI: convert mesh coordinates mm -> metres.
         mesh_m = MeshTri(mesh_obj.p * 1e-3, mesh_obj.t)
 
         basis, sxx, srr, stt, sxr = _assemble_and_solve(
-            mesh_m, OMEGA_REF_RAD_S, radial_breaks_m=radial_breaks * 1e-3
+            mesh_m, OMEGA_REF_RAD_S,
+            radial_breaks_m=radial_breaks * 1e-3,
+            arm_face_x_end_m=arm_face_x_end_m,
+            arm_face_r_min_m=arm_face_r_min_m,
+            arm_face_r_max_m=arm_face_r_max_m,
         )
 
         # Stresses come back in Pa -> convert to MPa.

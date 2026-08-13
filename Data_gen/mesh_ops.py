@@ -27,8 +27,8 @@ from .config import ZONE_NAME_TO_ID, ZONE_TO_REGION, REGION_NAME_TO_ID
 # Mesh size parameters (mm)
 # ---------------------------------------------------------------------------
 LC_BULK   = 2.0   # general interior / web bulk
-LC_EDGE   = 0.50
-LC_FILLET = 0.30  # fillet / transition zone boundaries (kept finer for stress)
+LC_EDGE   = 0.50  # uniform shell around the entire contour boundary (medium production)
+LC_FILLET = 0.30  # fillet / transition zone boundaries (medium production)
 LC_BORE   = 1.0   # bore inner face (high hoop stress surface)
 LC_RIM    = 1.2   # rim outer face
 
@@ -36,6 +36,9 @@ EDGE_INFLUENCE_MM   = 2.5   # depth of uniform boundary shell (just above edge_p
 FILLET_INFLUENCE_MM = 4.0   # distance field extent around each fillet radius
 BORE_INFLUENCE_MM   = 3.0   # distance field extent inward from bore inner radius
 RIM_INFLUENCE_MM    = 3.0   # distance field extent outward from rim outer radius
+
+# Feature-specific refinement influence radii (mm)
+FEAT_INFLUENCE_MM = 1.5    # neighbourhood for C-groove, ligament, arm features
 
 
 @dataclass
@@ -61,11 +64,16 @@ def generate_mesh(
     seed: int = 0,
     radial_breaks: Optional[np.ndarray] = None,
     geometry_params: Optional[dict] = None,
+    rim_feature_params: Optional[dict] = None,
 ) -> MeshData:
     """Generate an unstructured boundary-conforming triangular mesh via gmsh.
 
     ``grid_x``, ``grid_r`` and ``seed`` are accepted for call-site compatibility
     but are unused — mesh density is controlled by the LC_* constants.
+    ``rim_feature_params``: sanitised rim-feature parameters (RIM_FEATURE_PARAMETERS
+    keys).  When provided, named feature landmarks get individual Distance/Threshold
+    refinement fields for the C-groove, visible ligament, rear arm root, arm outer
+    corner, and arm end face.
     """
     import gmsh
 
@@ -190,23 +198,56 @@ def generate_mesh(
         ]
         _add_threshold(rim_pts, LC_RIM, RIM_INFLUENCE_MM * 2.0)
 
-        # 3e. Flange outer face — if flanges are present the contour extends
-        #     beyond r5.  Add a second refinement at the flange outer radius to
-        #     resolve the shoulder fillet stress concentration.
+        # 3e. Rim outer top — all arm/groove features reside above r5.
+        #     Refine broadly around the entire outer feature region.
         if r_max_contour > r5 + 0.5:
             rim_feature_pts = [
                 point_tags[i]
                 for i, (x, r) in enumerate(contour_points)
-                if (r > r5 + 0.15) or (abs(r - r5) < 0.35 and (abs(x) > 0.20 * (abs(contour_points[:,0]).max() + 1e-9)))
+                if r > r5 + 0.10
             ]
             _add_threshold(rim_feature_pts, LC_FILLET, FILLET_INFLUENCE_MM)
 
-            root_pts = [
-                point_tags[i]
-                for i, (x, r) in enumerate(contour_points)
-                if (r5 + 0.15 <= r <= r_max_contour - 0.15)
-            ]
-            _add_threshold(root_pts, LC_FILLET, FILLET_INFLUENCE_MM * 0.9)
+        # ------------------------------------------------------------------
+        # 3f. Named rim feature landmarks: C-groove, ligament, arm.
+        #     Each is a specific coordinate-based neighbourhood that gets
+        #     LC_FILLET refinement within FEAT_INFLUENCE_MM.
+        # ------------------------------------------------------------------
+        if rim_feature_params is not None and geometry_params is not None:
+            t_rim = float(geometry_params.get("rim_thickness", 20.0))
+            x_front = -0.5 * t_rim
+            x_rear = 0.5 * t_rim
+            h_arm = float(rim_feature_params.get("rear_arm_radial_height", 5.0))
+            cg_depth = float(rim_feature_params.get("front_cgroove_axial_depth", 4.0))
+            cg_pos = float(rim_feature_params.get("front_cgroove_radial_pos", 0.8))
+            cg_span = float(rim_feature_params.get("front_cgroove_radial_span", 3.0))
+            arm_proj = float(rim_feature_params.get("rear_arm_axial_projection", 4.0))
+            rf_root = float(rim_feature_params.get("rear_arm_root_radius", 0.6))
+            rf_corner = float(rim_feature_params.get("rear_arm_outer_corner_radius", 0.6))
+
+            r_arm_top = r5 + h_arm
+            x_arm_end = x_rear + arm_proj
+
+            # Named feature landmarks: [x, r] coordinates
+            feature_landmarks = {
+                "cgroove_entry":    (x_front, r5 + cg_pos),
+                "cgroove_floor":    (x_front + cg_depth, r5 + cg_pos + 0.5 * cg_span),
+                "cgroove_exit":     (x_front, r5 + cg_pos + cg_span),
+                "ligament":         (0.5 * (x_front + x_rear), r_arm_top),
+                "arm_root":         (x_rear, r_arm_top - 0.5 * rf_root),
+                "arm_neck":         (x_rear, r5 + 0.5 * float(rim_feature_params.get("rear_arm_neck_thickness", 2.0))),
+                "arm_outer_corner": (x_arm_end - 0.5 * rf_corner, r_arm_top - 0.5 * rf_corner),
+                "arm_end_face":     (x_arm_end, 0.5 * (r5 + r_arm_top)),
+            }
+
+            for feat_name, (fx, fr) in feature_landmarks.items():
+                feat_pts = [
+                    point_tags[i]
+                    for i, (px, pr) in enumerate(contour_points)
+                    if ((px - fx)**2 + (pr - fr)**2) < FEAT_INFLUENCE_MM**2
+                ]
+                if feat_pts:
+                    _add_threshold(feat_pts, LC_FILLET, FEAT_INFLUENCE_MM * 2.0)
 
         if all_threshold_ids:
             if len(all_threshold_ids) > 1:

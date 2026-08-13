@@ -13,9 +13,9 @@ import numpy as np
 
 try:
     from .config import (
-        CYCLE_PHASES, NOMINAL_FLANGE_MM, NOMINAL_GEOMETRY_MM,
-        radial_stations_from_params, resolve_flange_parameters,
-        clip_flange_offsets_to_bounds,
+        CYCLE_PHASES, NOMINAL_GEOMETRY_MM, NOMINAL_RIM_FEATURE_MM,
+        radial_stations_from_params, resolve_rim_feature_parameters,
+        clip_rim_feature_offsets_to_bounds,
     )
     from .sample_generator import generate_sample
 except ImportError:
@@ -23,9 +23,9 @@ except ImportError:
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from Data_gen.config import (
-        CYCLE_PHASES, NOMINAL_FLANGE_MM, NOMINAL_GEOMETRY_MM,
-        radial_stations_from_params, resolve_flange_parameters,
-        clip_flange_offsets_to_bounds,
+        CYCLE_PHASES, NOMINAL_GEOMETRY_MM, NOMINAL_RIM_FEATURE_MM,
+        radial_stations_from_params, resolve_rim_feature_parameters,
+        clip_rim_feature_offsets_to_bounds,
     )
     from Data_gen.sample_generator import generate_sample
 
@@ -230,28 +230,30 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
     ok_order = bt > rt > wt
     print(f"[{'PASS' if ok_order else 'FAIL'}] Nominal bore_thickness({bt}) > rim_thickness({rt}) > web_thickness({wt})")
 
-    # 2. Nominal step parameter sanity
-    nf = NOMINAL_FLANGE_MM
-    total_ax = (nf["front_flange_axial_length"] + nf["front_shoulder_offset"]
-                + nf["rear_flange_axial_length"] + nf["rear_shoulder_offset"])
-    fl_fits = total_ax < 0.90 * rt
-    print(f"[{'PASS' if fl_fits else 'FAIL'}] Nominal step axial extent ({total_ax:.1f} mm) < 0.90×rim ({0.90*rt:.1f} mm)")
+    # 2. Nominal rim-feature parameter sanity
+    nf = NOMINAL_RIM_FEATURE_MM
+    cg_depth = nf["front_cgroove_axial_depth"]
+    arm_proj = nf["rear_arm_axial_projection"]
+    t_rim = float(NOMINAL_GEOMETRY_MM["rim_thickness"])
+    ligament = t_rim - cg_depth
+    ligament_ok = ligament >= 2.0
+    print(f"[{'PASS' if ligament_ok else 'FAIL'}] Nominal C-groove ligament ({ligament:.1f} mm = t_rim - cg_depth) >= 2 mm")
 
     def _validate_one(
         label: str,
         offsets: dict[str, float],
         seed: int,
-        flange_offsets: dict[str, float] | None = None,
+        rim_feature_offsets: dict[str, float] | None = None,
     ) -> None:
         s_full = generate_sample(
             param_offsets=offsets,
             representation="full",
             seed=seed,
             include_debug_fields=True,
-            flange_param_offsets=flange_offsets,
+            rim_feature_offsets=rim_feature_offsets,
         )
         params = s_full["geometry_parameters_actual"]
-        fp_act = s_full.get("flange_parameters_actual", {})
+        fp_act = s_full.get("rim_feature_parameters_actual", {})
         rb_arr = radial_stations_from_params(params)
         r1, r2, r3, r4 = rb_arr[1], rb_arr[2], rb_arr[3], rb_arr[4]
         r5 = float(rb_arr[5])
@@ -269,11 +271,6 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         t_web = params["web_thickness"]
         order_ok = t_bore > t_rim > t_web
 
-        # -----------------------------------------------------------------
-        # Local mesh-spacing criterion (replaces global-fraction comparison).
-        # Criterion: mean inter-node spacing in transition zone < mean spacing
-        # in web bulk.  Ratio = spacing_web / spacing_transition; pass if ≥ 1.05.
-        # -----------------------------------------------------------------
         lower_ratio = _local_spacing_ratio(nodes, zone_ids, zone_id_feature=1)
         upper_ratio = _local_spacing_ratio(nodes, zone_ids, zone_id_feature=3)
         lower_denser = np.isfinite(lower_ratio) and lower_ratio >= _MIN_LOCAL_DENSITY_RATIO
@@ -296,94 +293,74 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         max_stress_transition = float(np.max(stress[(zone_ids == 1) | (zone_ids == 3)]))
         no_stripe = (max_stress_center_web < max_stress_transition) if np.isfinite(max_stress_center_web) else True
 
-        # -----------------------------------------------------------------
-        # Stepped rim geometry checks
-        # -----------------------------------------------------------------
-        h_fl = float(fp_act.get("front_flange_radial_height", 0.0))
-        h_rl = float(fp_act.get("rear_flange_radial_height", 0.0))
-        fl_ax = float(fp_act.get("front_flange_axial_length", 0.0))
-        rl_ax = float(fp_act.get("rear_flange_axial_length", 0.0))
-        sh_f = float(fp_act.get("front_shoulder_offset", 0.0))
-        sh_r = float(fp_act.get("rear_shoulder_offset", 0.0))
-        rf_f = float(fp_act.get("front_fillet_radius", 0.0))
-        rf_r = float(fp_act.get("rear_fillet_radius", 0.0))
-        rsf_f = float(fp_act.get("rim_to_step_fillet_radius_front", 0.0))
-        rsf_r = float(fp_act.get("rim_to_step_fillet_radius_rear", 0.0))
-
-        step_active_f = h_fl > 0.5 and fl_ax > 0.5
-        step_active_r = h_rl > 0.5 and rl_ax > 0.5
-        fl_top_land_f = fl_ax - rf_f - rsf_f
-        fl_top_land_r = rl_ax - rf_r - rsf_r
-        fl_top_ok_f = fl_top_land_f > 1e-3
-        fl_top_ok_r = fl_top_land_r > 1e-3
-        total_ax_fit = (fl_ax + sh_f + rl_ax + sh_r) < 0.90 * t_rim
-        symmetric = abs(h_fl - h_rl) < 0.01 and abs(fl_ax - rl_ax) < 0.01
+        # Rim-feature geometry checks
+        h_arm = float(fp_act.get("rear_arm_radial_height", 0.0))
+        neck_t = float(fp_act.get("rear_arm_neck_thickness", 0.0))
+        arm_proj = float(fp_act.get("rear_arm_axial_projection", 0.0))
+        cg_depth = float(fp_act.get("front_cgroove_axial_depth", 0.0))
+        cg_span = float(fp_act.get("front_cgroove_radial_span", 0.0))
+        ligament = t_rim - cg_depth
+        arm_active = h_arm > 1.0 and arm_proj > 1.0 and neck_t > 0.5
+        cg_active = cg_depth > 0.5 and cg_span > 0.5
+        ligament_ok = ligament >= 2.0
 
         # Contour validity
         contour = s_full["contour_points_mm"]
         r_max_contour = float(contour[:, 1].max())
-        step_visible = r_max_contour > r5 + 0.5
+        arm_visible = r_max_contour > r5 + 0.5
 
-        # Stepped rim mesh refinement: check nodes exist above r5 (step region)
-        # and that their local spacing is finer than web bulk
-        r_step_outer = r5 + max(h_fl, h_rl)
+        # Step region mesh
+        r_step_outer = r5 + h_arm
         step_ratio = _step_region_spacing_ratio(nodes, zone_ids, r5, r_step_outer)
         step_mesh_ok = np.isfinite(step_ratio) and step_ratio >= _MIN_LOCAL_DENSITY_RATIO
 
-        # Stepped rim stress and life (nearest-contour nodes above r5)
-        step_nodes_mask = nodes[:, 1] > r5 + 0.1
+        # Arm and groove stress / life
+        arm_nodes_mask = nodes[:, 1] > r5 + 0.1
         rim_flat_mask = (nodes[:, 1] >= r5 - 1.0) & (nodes[:, 1] <= r5 + 0.1)
-        has_step_nodes = np.any(step_nodes_mask)
+        has_arm_nodes = np.any(arm_nodes_mask)
         has_rim_flat_nodes = np.any(rim_flat_mask)
-
-        if has_step_nodes and has_rim_flat_nodes:
-            stress_fl_mean = float(np.mean(stress[step_nodes_mask]))
+        if has_arm_nodes and has_rim_flat_nodes:
+            stress_arm_mean = float(np.mean(stress[arm_nodes_mask]))
             stress_rim_mean = float(np.mean(stress[rim_flat_mask]))
-            life_fl_median = float(np.median(life[step_nodes_mask]))
+            life_arm_median = float(np.median(life[arm_nodes_mask]))
             life_rim_median = float(np.median(life[rim_flat_mask]))
         else:
-            stress_fl_mean = stress_rim_mean = np.nan
-            life_fl_median = life_rim_median = np.nan
+            stress_arm_mean = stress_rim_mean = np.nan
+            life_arm_median = life_rim_median = np.nan
 
         print(f"\n-- {label} sample --")
         print(f"  Core geometry:")
         print(f"  [{'PASS' if order_ok else 'FAIL'}] Thickness order bore({t_bore:.2f}) > rim({t_rim:.2f}) > web({t_web:.2f})")
         print(f"  [{'PASS' if lower_correct else 'FAIL'}] Lower transition threshold assignment zone_id==1")
         print(f"  [{'PASS' if upper_correct else 'FAIL'}] Upper transition threshold assignment zone_id==3")
-        # Local spacing criterion (replaces old global-fraction WARN):
         lr_str = f"{lower_ratio:.3f}" if np.isfinite(lower_ratio) else "n/a"
         ur_str = f"{upper_ratio:.3f}" if np.isfinite(upper_ratio) else "n/a"
-        print(f"  [{'PASS' if lower_denser else 'FAIL'}] Lower transition refinement ratio (p10 web/LT spacing) = {lr_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
-        print(f"  [{'PASS' if upper_denser else 'FAIL'}] Upper transition refinement ratio (p10 web/UT spacing) = {ur_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
+        print(f"  [{'PASS' if lower_denser else 'FAIL'}] Lower transition refinement ratio = {lr_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
+        print(f"  [{'PASS' if upper_denser else 'FAIL'}] Upper transition refinement ratio = {ur_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
         print(f"  [{'PASS' if discontinuity_ok else 'WARN'}] Life discontinuity LT/web={ratio_lt_web:.3f}, UT/web={ratio_ut_web:.3f}")
         if np.isfinite(max_stress_center_web):
             print(f"  [{'PASS' if no_stripe else 'WARN'}] Transition hotspot > web centerline: {max_stress_transition:.1f} > {max_stress_center_web:.1f} MPa")
         else:
             print("  [SKIP] Not enough web-center nodes for centerline check")
 
-        print(f"\n  Stepped rim geometry (resolved parameters):")
-        print(f"    Front: axial_length={fl_ax:.3f} mm, radial_height={h_fl:.3f} mm, shoulder={sh_f:.3f} mm")
-        print(f"           top_fillet={rf_f:.3f} mm, shoulder_fillet={rsf_f:.3f} mm, top_land={fl_top_land_f:.3f} mm")
-        print(f"    Rear:  axial_length={rl_ax:.3f} mm, radial_height={h_rl:.3f} mm, shoulder={sh_r:.3f} mm")
-        print(f"           top_fillet={rf_r:.3f} mm, shoulder_fillet={rsf_r:.3f} mm, top_land={fl_top_land_r:.3f} mm")
-        print(f"    Geometry: {'SYMMETRIC' if symmetric else 'ASYMMETRIC'} front/rear")
-        print(f"  [{'PASS' if step_active_f else 'FAIL'}] Front step geometrically active (height={h_fl:.2f} mm, axial={fl_ax:.2f} mm)")
-        print(f"  [{'PASS' if step_active_r else 'FAIL'}] Rear step geometrically active (height={h_rl:.2f} mm, axial={rl_ax:.2f} mm)")
-        print(f"  [{'PASS' if fl_top_ok_f else 'FAIL'}] Front step top-land positive ({fl_top_land_f:.3f} mm)")
-        print(f"  [{'PASS' if fl_top_ok_r else 'FAIL'}] Rear step top-land positive ({fl_top_land_r:.3f} mm)")
-        print(f"  [{'PASS' if total_ax_fit else 'FAIL'}] Total step axial extent ({fl_ax+sh_f+rl_ax+sh_r:.2f} mm) < 0.90×rim ({0.90*t_rim:.2f} mm)")
-        print(f"  [{'PASS' if step_visible else 'FAIL'}] Contour r_max ({r_max_contour:.2f} mm) > r5+0.5 ({r5+0.5:.2f} mm) — steps visible")
+        print(f"\n  Rim-feature geometry (C-groove + rear drive arm):")
+        print(f"    C-groove: depth={cg_depth:.3f} mm, span={cg_span:.3f} mm, ligament={ligament:.3f} mm")
+        print(f"    Drive arm: projection={arm_proj:.3f} mm, height={h_arm:.3f} mm, neck={neck_t:.3f} mm")
+        print(f"  [{'PASS' if arm_active else 'FAIL'}] Rear drive arm active (h={h_arm:.2f} mm, proj={arm_proj:.2f} mm)")
+        print(f"  [{'PASS' if cg_active else 'FAIL'}] Front C-groove active (depth={cg_depth:.2f} mm, span={cg_span:.2f} mm)")
+        print(f"  [{'PASS' if ligament_ok else 'FAIL'}] Positive ligament ({ligament:.2f} mm >= 2.0 mm)")
+        print(f"  [{'PASS' if arm_visible else 'FAIL'}] Contour r_max ({r_max_contour:.2f} mm) > r5+0.5 ({r5+0.5:.2f} mm)")
 
-        print(f"\n  Stepped rim mesh refinement:")
+        print(f"\n  Rim-feature mesh refinement:")
         fr_str = f"{step_ratio:.3f}" if np.isfinite(step_ratio) else "n/a"
-        print(f"  [{'PASS' if step_mesh_ok else 'FAIL'}] Stepped rim region refinement ratio (p10 web/step spacing) = {fr_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
+        print(f"  [{'PASS' if step_mesh_ok else 'FAIL'}] Arm region refinement ratio = {fr_str} >= {_MIN_LOCAL_DENSITY_RATIO}")
 
-        print(f"\n  Stepped rim FEM response (indicative, not acceptance criterion):")
-        if np.isfinite(stress_fl_mean):
-            print(f"    Mean stress near steps: {stress_fl_mean:.1f} MPa  |  near rim flat: {stress_rim_mean:.1f} MPa")
-            print(f"    Median life near steps: {life_fl_median:.2e} cycles  |  near rim flat: {life_rim_median:.2e} cycles")
+        print(f"\n  Rim-feature FEM response (indicative):")
+        if np.isfinite(stress_arm_mean):
+            print(f"    Mean stress arm region: {stress_arm_mean:.1f} MPa  |  near rim flat: {stress_rim_mean:.1f} MPa")
+            print(f"    Median life arm region: {life_arm_median:.2e} cycles  |  near rim flat: {life_rim_median:.2e} cycles")
         else:
-            print("    [SKIP] Insufficient step nodes for stress/life comparison")
+            print("    [SKIP] Insufficient arm nodes for stress/life comparison")
 
     default_offset = {
         "bore_radius_inner": -2.0,
@@ -398,21 +375,19 @@ def _print_validation(param_offsets: dict[str, float]) -> None:
         "lower_fillet_radius": -0.6,
         "upper_fillet_radius": 0.4,
     }
-    # Asymmetric step offsets for offset sample: front and rear differ.
-    asym_step_offset = {
-        "front_flange_axial_length": +0.20,
-        "rear_flange_axial_length":  -0.20,
-        "front_flange_radial_height": +0.15,
-        "rear_flange_radial_height":  -0.15,
-        "front_shoulder_offset": +0.10,
-        "rear_shoulder_offset":  -0.10,
+    asym_rf_offset = {
+        "front_cgroove_axial_depth":    +0.80,
+        "front_cgroove_radial_span":    +0.40,
+        "rear_arm_axial_projection":    +0.40,
+        "rear_arm_radial_height":       +0.30,
+        "rear_arm_neck_thickness":      -0.20,
     }
-    _validate_one("Nominal", {}, seed=0, flange_offsets={})
+    _validate_one("Nominal", {}, seed=0, rim_feature_offsets={})
     _validate_one(
-        "Offset (asymmetric steps)",
+        "Offset (asymmetric C-groove + arm)",
         param_offsets if param_offsets else default_offset,
         seed=13,
-        flange_offsets=clip_flange_offsets_to_bounds(asym_step_offset),
+        rim_feature_offsets=clip_rim_feature_offsets_to_bounds(asym_rf_offset),
     )
 
     print("=== End validation ===\n")

@@ -15,12 +15,12 @@ from .config import (
     CYCLE_PHASES,
     CYCLE_PHASE_WEIGHTS,
     CYCLE_SPEED_FACTORS,
-    MAX_FLANGE_OFFSET_MM,
     MAX_OFFSET_MM,
-    MIN_FLANGE_OFFSET_MM,
+    MAX_RIM_FEATURE_OFFSET_MM,
     MIN_OFFSET_MM,
-    NOMINAL_FLANGE_MM,
+    MIN_RIM_FEATURE_OFFSET_MM,
     NOMINAL_GEOMETRY_MM,
+    NOMINAL_RIM_FEATURE_MM,
     REGION_NAME_TO_ID,
     SUBZONE_NAME_TO_ID,
     ZONE_TO_REGION,
@@ -59,10 +59,10 @@ def create_dataset_file(
     h5f.create_dataset("min_offset_table", data=_as_key_value_table(MIN_OFFSET_MM))
     h5f.create_dataset("max_offset_table", data=_as_key_value_table(MAX_OFFSET_MM))
 
-    # Flange parameter tables (v4.0 addition; backward-compatible new datasets).
-    h5f.create_dataset("nominal_flange_table", data=_as_key_value_table(NOMINAL_FLANGE_MM))
-    h5f.create_dataset("min_flange_offset_table", data=_as_key_value_table(MIN_FLANGE_OFFSET_MM))
-    h5f.create_dataset("max_flange_offset_table", data=_as_key_value_table(MAX_FLANGE_OFFSET_MM))
+    # Rim-feature parameter tables (v5.0: C-groove + rear annular drive arm).
+    h5f.create_dataset("nominal_rim_feature_table", data=_as_key_value_table(NOMINAL_RIM_FEATURE_MM))
+    h5f.create_dataset("min_rim_feature_offset_table", data=_as_key_value_table(MIN_RIM_FEATURE_OFFSET_MM))
+    h5f.create_dataset("max_rim_feature_offset_table", data=_as_key_value_table(MAX_RIM_FEATURE_OFFSET_MM))
 
     h5f.create_dataset(
         "zone_name_to_id_mapping",
@@ -108,16 +108,16 @@ def write_sample_group(h5f: h5py.File, sample_id: int, sample_seed: int, sample:
     for key, value in sample["geometry_parameters_actual"].items():
         actual.attrs[key] = float(value)
 
-    # Flange parameters (v4.0).
-    if "flange_param_offsets" in sample:
-        fl_offs = sg.create_group("flange_param_offsets")
-        for key, value in sample["flange_param_offsets"].items():
-            fl_offs.attrs[key] = float(value)
+    # Rim-feature parameters (v5.0: C-groove + rear annular drive arm).
+    if "rim_feature_offsets" in sample:
+        rf_offs = sg.create_group("rim_feature_offsets")
+        for key, value in sample["rim_feature_offsets"].items():
+            rf_offs.attrs[key] = float(value)
 
-    if "flange_parameters_actual" in sample:
-        fl_actual = sg.create_group("flange_parameters_actual")
-        for key, value in sample["flange_parameters_actual"].items():
-            fl_actual.attrs[key] = float(value)
+    if "rim_feature_parameters_actual" in sample:
+        rf_actual = sg.create_group("rim_feature_parameters_actual")
+        for key, value in sample["rim_feature_parameters_actual"].items():
+            rf_actual.attrs[key] = float(value)
 
     # Blade-equivalent load metadata (v5.0 addition).
     if "blade_equiv_force_N" in sample:

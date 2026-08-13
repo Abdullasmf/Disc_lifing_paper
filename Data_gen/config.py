@@ -100,19 +100,18 @@ SUBZONE_NAME_TO_ID: Dict[str, int] = {
     "lower_transition":   1,
     "web":                2,
     "upper_transition":   3,
-    "rim_main":           4,   # main outer cap at r = r5
-    "front_step":       5,   # front flange face + top
-    "rear_step":        6,   # kept for backward compat; rear side now uses rear_platform*
-    "front_shoulder":     7,   # shoulder transition (front flange → main cap)
-    "rear_shoulder":      8,   # shoulder transition (main cap → rear flange); legacy
-    "front_groove":       9,   # relief groove cut into the front step land
-    "rear_platform":     10,   # blade-platform collar land + outer corner + load face
-    "rear_platform_root": 11,  # blade-platform collar root shoulder blend
+    "rim_main":           4,
+    "front_face":         5,   # front axial face (above and below C-groove)
+    "front_cgroove":      6,   # C-groove: entry fillet, walls, floor, exit fillet
+    "rear_arm_neck":      7,   # arm root neck face + shelf + top corner + ligament at top
+    "rear_arm_land":      8,   # arm body left face + arm land (horizontal at r5+h_arm)
+    "rear_arm_corner":    9,   # arm outer corner fillet
+    "rear_arm_end_face": 10,   # arm rear end face (load-transfer face)
 }
 SUBZONE_ID_TO_NAME: Dict[int, str] = {v: k for k, v in SUBZONE_NAME_TO_ID.items()}
 
-# Map from existing zone_name to subzone for the non-flange parts of the disc.
-# Flange subzone labels are assigned explicitly during outer-cap construction.
+# Map from existing zone_name to subzone for the non-feature parts of the disc.
+# Rim-feature subzone labels are assigned explicitly during outer-cap construction.
 ZONE_TO_SUBZONE: Dict[str, str] = {
     "bore":               "bore",
     "lower_transition":   "lower_transition",
@@ -122,128 +121,79 @@ ZONE_TO_SUBZONE: Dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Flange geometry parameters (outer-rim front/rear flanges).
+# Rim-feature geometry parameters: front C-groove + rear annular drive arm.
 #
-# Physical basis:
-#   Real turbine discs have front and rear flanges on the outer rim that:
-#     - Bolt to adjacent discs/sealings/spacers (axial flanges)
-#     - Create axially visible step/shoulder features
-#     - Introduce local stress concentrations at shoulder fillets
-#   These flanges are edge-visible geometry and are the key features driving
-#   stress localisation that is NOT present in the current flat outer cap.
+# Front C-groove: externally open side relief cut into the FRONT axial face
+#   of the rim (at x = -t_rim/2). The groove is open toward the front exterior
+#   and leaves a finite load-carrying ligament between the groove floor and the
+#   rear drive-arm root.
 #
-# Geometry definition (all in mm, disc x-axis = axial, r-axis = radial):
-#   The outer cap (currently flat at r = r5 from x=-t_rim/2 to x=+t_rim/2)
-#   is replaced by a path that includes:
-#     front flange face (vertical, at x = -t_rim/2):
-#       from r5 up to r5 + front_flange_radial_height
-#     front flange top-corner fillet (front_fillet_radius)
-#     front flange top (horizontal at r5 + front_flange_radial_height):
-#       from x = -t_rim/2 inward by front_flange_axial_length
-#     front shoulder smooth descent (rim_to_flange_fillet_radius_front):
-#       blend from r5+h_fl back down to r5 over front_shoulder_offset distance
-#     main outer cap (flat at r = r5)
-#     rear shoulder smooth ascent (symmetric)
-#     rear flange top + top-corner fillet (rear_fillet_radius)
-#     rear flange face (vertical, at x = +t_rim/2)
+# Rear drive arm: annular axial projection beyond the rim core (at x > +t_rim/2).
+#   The arm has a visible narrow neck/root, a step shelf, a body section, a
+#   horizontal land at r5+h_arm, an outer corner fillet, and a load-transfer
+#   end face.  The blade-equivalent centrifugal resultant is applied as a
+#   distributed traction on this end face.
 #
-# Constraint: front_flange_axial_length + front_shoulder_offset
-#           + rear_flange_axial_length  + rear_shoulder_offset  < rim_thickness
-#   (ensures front and rear flanges do not overlap on the outer cap)
-#
-# Recommended default ranges that produce realistic discs without breaking mesh:
-#   front/rear_flange_axial_length : [2.0, 5.0] mm
-#   front/rear_flange_radial_height: [1.5, 4.0] mm
-#   front/rear_shoulder_offset     : [1.0, 2.5] mm
-#   front/rear_fillet_radius       : [0.5, 1.5] mm  (top-corner fillet)
-#   rim_to_flange_fillet_radius_*  : [0.4, 1.2] mm  (shoulder fillet)
+# All parameters are in mm. Nominal values are chosen so that the geometry is
+# robustly meshable with the medium LC settings (LC_EDGE=0.50, LC_FILLET=0.30).
 # ---------------------------------------------------------------------------
 
-FLANGE_GEOMETRY_PARAMETERS = (
-    "front_flange_axial_length",
-    "rear_flange_axial_length",
-    "front_flange_radial_height",
-    "rear_flange_radial_height",
-    "front_shoulder_offset",
-    "rear_shoulder_offset",
-    "front_fillet_radius",
-    "rear_fillet_radius",
-    "rim_to_flange_fillet_radius_front",
-    "rim_to_flange_fillet_radius_rear",
-    "front_groove_depth",
-    "front_groove_width",
-    "front_groove_pos",
-    "front_groove_radius",
+RIM_FEATURE_PARAMETERS = (
+    # Front C-groove
+    "front_cgroove_axial_depth",     # axial penetration from x_front inward
+    "front_cgroove_radial_span",     # radial height of the groove opening
+    "front_cgroove_radial_pos",      # r offset of groove bottom above r5 (rim outer)
+    "front_cgroove_entry_radius",    # entry fillet radius (UP→RIGHT at groove mouth)
+    "front_cgroove_floor_radius",    # floor corner fillet radius (inner corners)
+    "front_cgroove_exit_radius",     # exit fillet radius (LEFT→UP above groove)
+    # Rear annular drive arm
+    "rear_arm_axial_projection",     # axial extent of arm beyond x_rear (= t_rim/2)
+    "rear_arm_radial_height",        # radial height of arm body above r5
+    "rear_arm_neck_thickness",       # radial height of arm root/neck (< radial_height)
+    "rear_arm_root_radius",          # fillet radius at arm root transitions
+    "rear_arm_outer_corner_radius",  # fillet radius at arm outer (top-rear) corner
 )
 
-# ---------------------------------------------------------------------------
-# Rear-side naming clarification: the rear "flange" parameters describe a
-# blade-platform surrogate collar (attachment for the blade-equivalent
-# centrifugal load, see BLADE_EQUIV_* below), not a bolted flange:
-#   rear_flange_axial_length          -> platform land length
-#   rear_flange_radial_height         -> platform height above rim core
-#   rear_shoulder_offset              -> platform root shoulder axial extent
-#   rear_fillet_radius                -> platform outer corner fillet
-#   rim_to_flange_fillet_radius_rear  -> platform root fillet
-#
-# Front-side additions describe a relief groove cut into the front step land,
-# immediately inboard of the front step's outer corner fillet:
-#   front_groove_depth   - radial depth of the groove
-#   front_groove_width   - axial width of the groove
-#   front_groove_pos     - axial gap between the front corner fillet and the
-#                          start of the groove entry fillet
-#   front_groove_radius  - fillet radius at groove entry/root corners
-# ---------------------------------------------------------------------------
-
-NOMINAL_FLANGE_MM: Dict[str, float] = {
-    "front_flange_axial_length":          5.5,   # extended to accommodate the relief groove
-    "rear_flange_axial_length":           5.0,   # blade-platform land length
-    "front_flange_radial_height":         2.5,
-    "rear_flange_radial_height":          2.5,   # blade-platform height
-    "front_shoulder_offset":              1.5,
-    "rear_shoulder_offset":               2.0,   # blade-platform root extent
-    "front_fillet_radius":                1.0,   # top-corner fillet, front flange
-    "rear_fillet_radius":                 1.0,   # platform outer corner fillet
-    "rim_to_flange_fillet_radius_front":  0.8,   # shoulder-blend fillet, front
-    "rim_to_flange_fillet_radius_rear":   1.0,   # platform root fillet
-    "front_groove_depth":                 1.0,   # relief groove radial depth
-    "front_groove_width":                 2.0,   # relief groove axial width
-    "front_groove_pos":                   0.5,   # gap from corner fillet to groove entry
-    "front_groove_radius":                0.6,   # groove entry/root fillet radius
+NOMINAL_RIM_FEATURE_MM: Dict[str, float] = {
+    "front_cgroove_axial_depth":    4.0,   # 4 mm inward from x_front
+    "front_cgroove_radial_span":    3.0,   # 3 mm groove height
+    "front_cgroove_radial_pos":     0.8,   # groove bottom 0.8 mm above r5
+    "front_cgroove_entry_radius":   0.6,   # entry fillet
+    "front_cgroove_floor_radius":   0.6,   # floor corners
+    "front_cgroove_exit_radius":    0.6,   # exit fillet
+    "rear_arm_axial_projection":    4.0,   # arm extends 4 mm beyond x_rear
+    "rear_arm_radial_height":       5.0,   # arm body is 5 mm tall above r5
+    "rear_arm_neck_thickness":      2.0,   # neck is 2 mm tall (< 5 mm body)
+    "rear_arm_root_radius":         0.6,   # root/transition fillets
+    "rear_arm_outer_corner_radius": 0.6,   # outer arm corner
 }
 
-MIN_FLANGE_OFFSET_MM: Dict[str, float] = {
-    "front_flange_axial_length":          -0.50,
-    "rear_flange_axial_length":           -0.50,
-    "front_flange_radial_height":         -0.20,
-    "rear_flange_radial_height":          -0.20,
-    "front_shoulder_offset":              -0.20,
-    "rear_shoulder_offset":               -0.25,
-    "front_fillet_radius":                -0.10,
-    "rear_fillet_radius":                 -0.10,
-    "rim_to_flange_fillet_radius_front":  -0.10,
-    "rim_to_flange_fillet_radius_rear":   -0.10,
-    "front_groove_depth":                 -0.15,
-    "front_groove_width":                 -0.20,
-    "front_groove_pos":                   -0.10,
-    "front_groove_radius":                -0.08,
+MIN_RIM_FEATURE_OFFSET_MM: Dict[str, float] = {
+    "front_cgroove_axial_depth":    -1.00,
+    "front_cgroove_radial_span":    -0.50,
+    "front_cgroove_radial_pos":     -0.20,
+    "front_cgroove_entry_radius":   -0.15,
+    "front_cgroove_floor_radius":   -0.15,
+    "front_cgroove_exit_radius":    -0.15,
+    "rear_arm_axial_projection":    -0.50,
+    "rear_arm_radial_height":       -0.40,
+    "rear_arm_neck_thickness":      -0.30,
+    "rear_arm_root_radius":         -0.15,
+    "rear_arm_outer_corner_radius": -0.15,
 }
 
-MAX_FLANGE_OFFSET_MM: Dict[str, float] = {
-    "front_flange_axial_length":          +0.50,
-    "rear_flange_axial_length":           +0.50,
-    "front_flange_radial_height":         +0.20,
-    "rear_flange_radial_height":          +0.20,
-    "front_shoulder_offset":              +0.20,
-    "rear_shoulder_offset":               +0.25,
-    "front_fillet_radius":                +0.10,
-    "rear_fillet_radius":                 +0.10,
-    "rim_to_flange_fillet_radius_front":  +0.10,
-    "rim_to_flange_fillet_radius_rear":   +0.10,
-    "front_groove_depth":                 +0.15,
-    "front_groove_width":                 +0.20,
-    "front_groove_pos":                   +0.10,
-    "front_groove_radius":                +0.08,
+MAX_RIM_FEATURE_OFFSET_MM: Dict[str, float] = {
+    "front_cgroove_axial_depth":    +1.00,
+    "front_cgroove_radial_span":    +0.50,
+    "front_cgroove_radial_pos":     +0.20,
+    "front_cgroove_entry_radius":   +0.15,
+    "front_cgroove_floor_radius":   +0.15,
+    "front_cgroove_exit_radius":    +0.15,
+    "rear_arm_axial_projection":    +0.50,
+    "rear_arm_radial_height":       +0.40,
+    "rear_arm_neck_thickness":      +0.30,
+    "rear_arm_root_radius":         +0.15,
+    "rear_arm_outer_corner_radius": +0.15,
 }
 
 # ---------------------------------------------------------------------------
@@ -251,8 +201,8 @@ MAX_FLANGE_OFFSET_MM: Dict[str, float] = {
 # Physical basis: annular average of N blades of mass m_blade each,
 # rotating at omega_ref with CG at r_cg.
 # F_total = N * m_blade * omega_ref^2 * r_cg  [N]
-# Applied as radial traction on the rear platform load-transfer boundary
-# (the vertical rear_platform face at x = +t_rim/2).
+# Applied as radial traction on the rear drive-arm load-transfer boundary
+# (the vertical rear_arm_end_face at x = +t_rim/2 + arm projection).
 # This load is fixed (identical for every generated sample) — it is not part
 # of the LHS-sampled parameter space.
 # ---------------------------------------------------------------------------
@@ -439,31 +389,27 @@ def radial_stations_from_params(params: Dict[str, float]) -> np.ndarray:
     return np.array([r0, r1, r2, r3, r4, r5], dtype=np.float64)
 
 
-def resolve_flange_parameters(flange_offsets: Dict[str, float] | None) -> Dict[str, float]:
-    """Return actual flange parameter values by applying offsets to nominal values.
-
-    Unknown keys in *flange_offsets* are silently ignored so that callers that
-    only partially specify flanges still get valid defaults for the rest.
-    """
+def resolve_rim_feature_parameters(rim_feature_offsets: Dict[str, float] | None) -> Dict[str, float]:
+    """Return actual rim-feature parameter values by applying offsets to nominal."""
     actual: Dict[str, float] = {}
-    for k in FLANGE_GEOMETRY_PARAMETERS:
-        offset = float(flange_offsets.get(k, 0.0)) if flange_offsets else 0.0
-        actual[k] = float(NOMINAL_FLANGE_MM[k] + offset)
+    for k in RIM_FEATURE_PARAMETERS:
+        offset = float(rim_feature_offsets.get(k, 0.0)) if rim_feature_offsets else 0.0
+        actual[k] = float(NOMINAL_RIM_FEATURE_MM[k] + offset)
     return actual
 
 
-def clip_flange_offsets_to_bounds(flange_offsets: Dict[str, float]) -> Dict[str, float]:
-    """Clip flange offsets to their configured min/max bounds."""
+def clip_rim_feature_offsets_to_bounds(rim_feature_offsets: Dict[str, float]) -> Dict[str, float]:
+    """Clip rim-feature offsets to their configured min/max bounds."""
     out: Dict[str, float] = {}
-    for k in FLANGE_GEOMETRY_PARAMETERS:
-        v = float(flange_offsets.get(k, 0.0))
-        out[k] = float(np.clip(v, MIN_FLANGE_OFFSET_MM[k], MAX_FLANGE_OFFSET_MM[k]))
+    for k in RIM_FEATURE_PARAMETERS:
+        v = float(rim_feature_offsets.get(k, 0.0))
+        out[k] = float(np.clip(v, MIN_RIM_FEATURE_OFFSET_MM[k], MAX_RIM_FEATURE_OFFSET_MM[k]))
     return out
 
 
-def flange_offset_vector_to_dict(vector: np.ndarray) -> Dict[str, float]:
-    return {k: float(v) for k, v in zip(FLANGE_GEOMETRY_PARAMETERS, vector)}
+def rim_feature_offset_vector_to_dict(vector: np.ndarray) -> Dict[str, float]:
+    return {k: float(v) for k, v in zip(RIM_FEATURE_PARAMETERS, vector)}
 
 
-def flange_offsets_dict_to_vector(offsets: Dict[str, float]) -> np.ndarray:
-    return np.array([float(offsets.get(k, 0.0)) for k in FLANGE_GEOMETRY_PARAMETERS], dtype=np.float64)
+def rim_feature_offsets_dict_to_vector(offsets: Dict[str, float]) -> np.ndarray:
+    return np.array([float(offsets.get(k, 0.0)) for k in RIM_FEATURE_PARAMETERS], dtype=np.float64)
