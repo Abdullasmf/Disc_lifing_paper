@@ -28,14 +28,13 @@ except ImportError:
     from Data_gen.sample_generator import generate_sample
 
 
-# With the new C-groove + rear arm geometry, the blade-equivalent traction is
-# applied to the small arm end face (h_arm ~ 5mm height), transferring through
-# the arm root and ligament into the disc body.  The centrifugal body load
-# drives the lower-transition fillet as the global peak; the arm traction
-# adds a secondary contribution.  Total peak at nominal geometry is ~3600 MPa.
-# Bounds below accommodate geometry variation across LHS samples.
-PEAK_STRESS_MIN_MPA = 300.0
-PEAK_STRESS_MAX_MPA = 8000.0
+# With the redesigned rim geometry (larger arm + deeper C-groove) and blade traction
+# applied to the rim-top face (ligament + arm land at r = r5 + h_arm), the peak
+# von Mises stress at nominal geometry is expected in ~300–1300 MPa.
+# The rear drive arm is NOT a load-transfer face; stress there arises only through
+# structural continuity, body force, and redistribution.
+PEAK_STRESS_MIN_MPA = 200.0
+PEAK_STRESS_MAX_MPA = 1500.0
 
 
 def main() -> None:

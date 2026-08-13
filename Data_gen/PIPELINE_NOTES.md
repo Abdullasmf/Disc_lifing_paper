@@ -44,70 +44,77 @@ dataset_generator.py → generate_dataset() (LHS or explicit offsets, batch)
 
 ---
 
-## Changes in v5.0 (C-groove + rear drive arm)
+## Changes in v6.0 (correct blade load path + enlarged rim geometry)
+
+### Fixed modelling decisions (v6.0)
+
+1. **Blade centrifugal load moved to the rim-top face** — previously applied to the
+   small rear arm end face, now applied to the physically correct boundary: the
+   horizontal rim-top face at r = r5 + h_arm (ligament + arm land).
+2. **Rear drive arm receives no direct blade load** — the arm experiences stress only
+   through structural continuity with the loaded rim, disc body force, and redistribution.
+3. **Larger rear arm geometry** — substantially enlarged to be a credible structural feature:
+   axial projection 8 mm (was 4 mm), radial height 8 mm (was 5 mm), neck thickness 4 mm
+   (was 2 mm), root fillets 1.0 mm (was 0.6 mm).
+4. **Deeper C-groove** — axial depth 6 mm (was 4 mm), radial span 4 mm (was 3 mm),
+   fillets 0.8 mm (was 0.6 mm).
+5. **LHS offset bounds widened** to reflect larger nominal dimensions.
+6. **Nominal peak stress target: 300–1500 MPa** — replacing the previously
+   unphysical 3.37–3.70 GPa from the overloaded arm end face.
+
+### Changes in v5.0 (C-groove + rear drive arm)
 
 The previous smooth flange/collar geometry has been replaced with:
 
 1. A **front-side externally open C-groove** — cut into the front axial face of the rim.
-2. A **rear annular drive arm** — with a visible narrow neck/root, arm body, outer corner fillet,
-   and a finite vertical end/load face.
+2. A **rear annular drive arm** — with a visible neck/root, arm body, outer corner fillet,
+   and a finite vertical end face (not a load face by default).
 3. A **finite visible ligament** — between the C-groove floor and the arm neck/root.
 
-### What was changed
+### What was changed in v6.0
 
 #### `config.py`
-- Replaced `FLANGE_GEOMETRY_PARAMETERS` / `NOMINAL_FLANGE_MM` / etc. with:
-  - `RIM_FEATURE_PARAMETERS` (11 parameters)
-  - `NOMINAL_RIM_FEATURE_MM` — nominal C-groove and arm values
-  - `MIN_RIM_FEATURE_OFFSET_MM`, `MAX_RIM_FEATURE_OFFSET_MM` — LHS bounds
-  - `resolve_rim_feature_parameters()` — applies offsets to nominal
-  - `clip_rim_feature_offsets_to_bounds()` — clips offsets to configured bounds
-- Updated `SUBZONE_NAME_TO_ID` (11 subzones) for the new geometry.
-- Added blade-equivalent load constants: `BLADE_EQUIV_NUM_BLADES`, `BLADE_EQUIV_MASS_KG`,
-  `BLADE_EQUIV_CG_RADIUS_MM`.
+- `NOMINAL_RIM_FEATURE_MM` updated with larger/credible arm and groove dimensions.
+- `MIN/MAX_RIM_FEATURE_OFFSET_MM` widened to match new nominals.
+- Blade-load comment updated: load is at rim-top face, NOT rear arm end face.
 
 #### `geometry.py`
-- `ContourData` gains `subzone_ids` and `subzone_names` fields.
-- `sanitize_rim_feature_parameters()` — enforces meshable, non-overlapping limits.
-- `_build_outer_cap_cgroove_arm()` — builds the full C-groove + arm outer contour.
-- `build_disc_contour(..., rim_feature_params=...)` — accepts new rim-feature dict.
-- Returns landmarks for all C-groove, ligament, arm, and blade-face features.
-- `rim_core_reference` landmark placed at interior rim (x=0, r=r4+40%×rim_height),
-  away from stress concentrations for stable convergence metrics.
+- `sanitize_rim_feature_parameters()`: h_arm cap raised (0.45→0.55 × t_rim);
+  arm projection `proj_max` changed from bore_thickness-limited to fixed generous limit (20 mm).
+- `rf_root_max` formula simplified (removed self-referential term).
+- `_build_outer_cap_cgroove_arm()`: `blade_arm_face_*` metadata replaced with
+  `blade_rim_top_*` (r = r_arm_top, x from x_front to x_arm_end).
+- `build_disc_contour()`: metadata stores `blade_rim_top_r_mm`, `blade_rim_top_x_min_mm`,
+  `blade_rim_top_x_max_mm`; arm face keys removed.
 
 #### `physics.py`
-- Blade-equivalent traction applied on the tagged rear arm end face via `FacetBasis`.
-- Arm face identified from `blade_arm_face_x_end_mm`, `blade_arm_face_r_min_mm`,
-  `blade_arm_face_r_max_mm` geometry metadata — not broad radial thresholds.
-- If no arm facets found, the load is skipped with a warning (not silently omitted).
+- `_assemble_and_solve()` now selects **horizontal** rim-top facets (near-zero Δr) at
+  r ≈ rim_top_r_m instead of vertical arm end-face facets.
+- `compute_phase_equivalent_stresses()` parameter renamed `arm_face_metadata` →
+  `rim_face_metadata`; metadata keys updated to `blade_rim_top_*`.
 
 #### `sample_generator.py`
-- Accepts `rim_feature_offsets` kwarg (default `None` → nominal rim features).
-- Passes arm-face metadata to FEM for precise blade traction application.
+- Metadata key prefix updated from `blade_arm_face_` to `blade_rim_top_`.
+- `arm_face_metadata` → `rim_face_metadata` in FEM call.
+- `blade_equiv_load_description` updated to name the correct boundary.
 
-#### `dataset_generator.py`
-- LHS samples all 11 rim-feature parameters independently.
-- `--validate-lhs` proves nonzero spread for every parameter.
+#### `validate_fem_nominal.py`
+- `PEAK_STRESS_MAX_MPA` reduced from 8000 → 1500 MPa to enforce physical validity.
 
-#### `io_hdf5.py`
-- Stores `rim_feature_offsets` and `rim_feature_parameters_actual` per sample.
+#### What was changed in v5.0
 
-#### `mesh_ops.py`
-- Named refinement targets: C-groove entry/floor/exit, ligament, arm root/neck/corner/end face.
-
-#### `mesh_feature_diagnostics.py` *(new)*
-- Feature-neighbourhood diagnostics at medium and fine mesh.
-- Reports p90 stress, max stress, median life, min life per feature.
-- Saves JSON for convergence comparison.
-
-#### `compare_mesh_feature_diagnostics.py` *(new)*
-- Loads medium and fine JSON files.
-- Computes medium-to-fine relative change: linear for p90 stress, log-scale for median life.
-- Convergence criterion: ≤ 15 % for both metrics.
-
-#### `analyze_locality_probe.py` *(new)*
-- Local feature-neighbourhood stress/life report for nominal and high-feature geometries.
-- Reports feature-vs-baseline comparisons for all 11 feature landmarks.
+- `config.py`: Replaced `FLANGE_GEOMETRY_PARAMETERS` with `RIM_FEATURE_PARAMETERS` (11 parameters),
+  `NOMINAL_RIM_FEATURE_MM`, bounds, helpers, `SUBZONE_NAME_TO_ID`, blade-load constants.
+- `geometry.py`: `ContourData` gains `subzone_ids`/`subzone_names`; `sanitize_rim_feature_parameters()`;
+  `_build_outer_cap_cgroove_arm()`; `build_disc_contour(..., rim_feature_params=...)`.
+- `physics.py`: Blade-equivalent traction applied via `FacetBasis`. (v6.0 changes location.)
+- `sample_generator.py`: `rim_feature_offsets` kwarg; passes face metadata to FEM.
+- `dataset_generator.py`: LHS samples all 11 rim-feature parameters.
+- `io_hdf5.py`: Stores `rim_feature_offsets` and `rim_feature_parameters_actual` per sample.
+- `mesh_ops.py`: Named refinement targets: C-groove, ligament, arm features.
+- `mesh_feature_diagnostics.py` *(new)*: Feature-neighbourhood diagnostics.
+- `compare_mesh_feature_diagnostics.py` *(new)*: Medium vs fine convergence.
+- `analyze_locality_probe.py` *(new)*: Local feature stress/life probe.
 
 ---
 
@@ -121,22 +128,22 @@ All lengths in millimetres (mm). Nominal values defined in `NOMINAL_RIM_FEATURE_
 
 | Parameter | Nominal | Offset range | Description |
 |-----------|---------|-------------|-------------|
-| `front_cgroove_axial_depth` | 4.0 | ±1.0 | Axial penetration from front face inward |
-| `front_cgroove_radial_span` | 3.0 | ±0.5 | Radial height of groove opening |
-| `front_cgroove_radial_pos` | 0.8 | ±0.2 | r offset of groove bottom above r5 |
-| `front_cgroove_entry_radius` | 0.6 | ±0.15 | Entry fillet radius |
-| `front_cgroove_floor_radius` | 0.6 | ±0.15 | Floor corner fillet radius |
-| `front_cgroove_exit_radius` | 0.6 | ±0.15 | Exit fillet radius |
+| `front_cgroove_axial_depth` | 6.0 | ±1.5 | Axial penetration from front face inward |
+| `front_cgroove_radial_span` | 4.0 | ±1.0 | Radial height of groove opening |
+| `front_cgroove_radial_pos` | 1.0 | ±0.3 | r offset of groove bottom above r5 |
+| `front_cgroove_entry_radius` | 0.8 | ±0.2 | Entry fillet radius |
+| `front_cgroove_floor_radius` | 0.8 | ±0.2 | Floor corner fillet radius |
+| `front_cgroove_exit_radius` | 0.8 | ±0.2 | Exit fillet radius |
 
 #### Rear drive-arm parameters
 
 | Parameter | Nominal | Offset range | Description |
 |-----------|---------|-------------|-------------|
-| `rear_arm_axial_projection` | 4.0 | ±0.5 | Axial extent of arm beyond rear face |
-| `rear_arm_radial_height` | 5.0 | ±0.4 | Radial height of arm body above r5 |
-| `rear_arm_neck_thickness` | 2.0 | ±0.3 | Radial height of arm neck/root (< radial_height) |
-| `rear_arm_root_radius` | 0.6 | ±0.15 | Root/transition fillet radius |
-| `rear_arm_outer_corner_radius` | 0.6 | ±0.15 | Outer arm corner fillet radius |
+| `rear_arm_axial_projection` | 8.0 | ±1.5/+2.0 | Axial extent of arm beyond rear face |
+| `rear_arm_radial_height` | 8.0 | ±1.0/+2.0 | Radial height of arm body above r5 |
+| `rear_arm_neck_thickness` | 4.0 | ±0.8/+1.0 | Radial height of arm neck/root (< radial_height) |
+| `rear_arm_root_radius` | 1.0 | ±0.2/+0.3 | Root/transition fillet radius |
+| `rear_arm_outer_corner_radius` | 1.0 | ±0.2/+0.3 | Outer arm corner fillet radius |
 
 **Physical constraints** enforced by `sanitize_rim_feature_parameters()`:
 - neck_thickness < 0.80 × radial_height
@@ -187,9 +194,9 @@ Landmarks are stored in `ContourData.landmarks_mm` and in the generated sample d
 | `rim_core_reference` | Interior rim reference (x=0, r=r4+40%×rim_height) [x, r] |
 | `lower_transition_start` | Lower fillet start [0, r1] |
 | `upper_transition_start` | Upper fillet start [0, r3] |
-| `blade_arm_face_x_end_mm` | Arm end-face x coordinate [mm] |
-| `blade_arm_face_r_min_mm` | Arm end-face r_min [mm] |
-| `blade_arm_face_r_max_mm` | Arm end-face r_max [mm] |
+| `blade_rim_top_r_mm` | Rim-top blade-attachment face radial position [mm] |
+| `blade_rim_top_x_min_mm` | Rim-top face axial start (x_front) [mm] |
+| `blade_rim_top_x_max_mm` | Rim-top face axial end (x_arm_end) [mm] |
 
 ---
 
@@ -200,9 +207,30 @@ The blade-equivalent centrifugal resultant is:
 F = N_blades × m_blade × ω² × r_cg
   = 60 × 0.003 kg × (4000 rad/s)² × 0.115 m ≈ 331 kN
 ```
-Applied as radial distributed traction over the tagged rear arm end face.
+Applied as **radial distributed traction** over the **rim-top blade-attachment face**:
+the horizontal boundary at r = r5 + h_arm (ligament + arm land).
+
+This represents blades pulling the disc rim radially outward through their attachment region.
+
+**The rear drive arm receives NO direct blade-equivalent traction by default.**
+The arm experiences stress only through:
+- structural continuity with the loaded rim;
+- disc centrifugal body force;
+- internal stress redistribution.
+
+Metadata keys in `ContourData.metadata` and sample dict:
+- `blade_rim_top_r_mm` — radial position of blade-attachment face [mm]
+- `blade_rim_top_x_min_mm` — axial start of blade-attachment face [mm]
+- `blade_rim_top_x_max_mm` — axial end of blade-attachment face [mm]
 
 **Fixed across all samples** — not LHS-sampled.
+
+Nominal traction estimate (takeoff):
+```
+l_face ≈ 22 mm (meridional arc: ligament + arm land)
+r_mid ≈ 115 mm
+t_r = F / (2π × r_mid × l_face) ≈ 21 MPa
+```
 
 ---
 

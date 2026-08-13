@@ -155,45 +155,45 @@ RIM_FEATURE_PARAMETERS = (
 )
 
 NOMINAL_RIM_FEATURE_MM: Dict[str, float] = {
-    "front_cgroove_axial_depth":    4.0,   # 4 mm inward from x_front
-    "front_cgroove_radial_span":    3.0,   # 3 mm groove height
-    "front_cgroove_radial_pos":     0.8,   # groove bottom 0.8 mm above r5
-    "front_cgroove_entry_radius":   0.6,   # entry fillet
-    "front_cgroove_floor_radius":   0.6,   # floor corners
-    "front_cgroove_exit_radius":    0.6,   # exit fillet
-    "rear_arm_axial_projection":    4.0,   # arm extends 4 mm beyond x_rear
-    "rear_arm_radial_height":       5.0,   # arm body is 5 mm tall above r5
-    "rear_arm_neck_thickness":      2.0,   # neck is 2 mm tall (< 5 mm body)
-    "rear_arm_root_radius":         0.6,   # root/transition fillets
-    "rear_arm_outer_corner_radius": 0.6,   # outer arm corner
+    "front_cgroove_axial_depth":    6.0,   # 6 mm inward from x_front (deeper groove)
+    "front_cgroove_radial_span":    4.0,   # 4 mm groove height (wider groove)
+    "front_cgroove_radial_pos":     1.0,   # groove bottom 1 mm above r5
+    "front_cgroove_entry_radius":   0.8,   # entry fillet
+    "front_cgroove_floor_radius":   0.8,   # floor corners
+    "front_cgroove_exit_radius":    0.8,   # exit fillet
+    "rear_arm_axial_projection":    8.0,   # arm extends 8 mm beyond x_rear (credible flange)
+    "rear_arm_radial_height":       8.0,   # arm body is 8 mm tall above r5 (credible rim feature)
+    "rear_arm_neck_thickness":      4.0,   # neck is 4 mm tall (thick enough to be credible)
+    "rear_arm_root_radius":         1.0,   # generous root/transition fillets
+    "rear_arm_outer_corner_radius": 1.0,   # generous outer arm corner fillet
 }
 
 MIN_RIM_FEATURE_OFFSET_MM: Dict[str, float] = {
-    "front_cgroove_axial_depth":    -1.00,
-    "front_cgroove_radial_span":    -0.50,
-    "front_cgroove_radial_pos":     -0.20,
-    "front_cgroove_entry_radius":   -0.15,
-    "front_cgroove_floor_radius":   -0.15,
-    "front_cgroove_exit_radius":    -0.15,
-    "rear_arm_axial_projection":    -0.50,
-    "rear_arm_radial_height":       -0.40,
-    "rear_arm_neck_thickness":      -0.30,
-    "rear_arm_root_radius":         -0.15,
-    "rear_arm_outer_corner_radius": -0.15,
+    "front_cgroove_axial_depth":    -1.50,
+    "front_cgroove_radial_span":    -1.00,
+    "front_cgroove_radial_pos":     -0.30,
+    "front_cgroove_entry_radius":   -0.20,
+    "front_cgroove_floor_radius":   -0.20,
+    "front_cgroove_exit_radius":    -0.20,
+    "rear_arm_axial_projection":    -1.50,
+    "rear_arm_radial_height":       -1.00,
+    "rear_arm_neck_thickness":      -0.80,
+    "rear_arm_root_radius":         -0.20,
+    "rear_arm_outer_corner_radius": -0.20,
 }
 
 MAX_RIM_FEATURE_OFFSET_MM: Dict[str, float] = {
-    "front_cgroove_axial_depth":    +1.00,
-    "front_cgroove_radial_span":    +0.50,
-    "front_cgroove_radial_pos":     +0.20,
-    "front_cgroove_entry_radius":   +0.15,
-    "front_cgroove_floor_radius":   +0.15,
-    "front_cgroove_exit_radius":    +0.15,
-    "rear_arm_axial_projection":    +0.50,
-    "rear_arm_radial_height":       +0.40,
-    "rear_arm_neck_thickness":      +0.30,
-    "rear_arm_root_radius":         +0.15,
-    "rear_arm_outer_corner_radius": +0.15,
+    "front_cgroove_axial_depth":    +1.50,
+    "front_cgroove_radial_span":    +1.00,
+    "front_cgroove_radial_pos":     +0.30,
+    "front_cgroove_entry_radius":   +0.20,
+    "front_cgroove_floor_radius":   +0.20,
+    "front_cgroove_exit_radius":    +0.20,
+    "rear_arm_axial_projection":    +2.00,
+    "rear_arm_radial_height":       +2.00,
+    "rear_arm_neck_thickness":      +1.00,
+    "rear_arm_root_radius":         +0.30,
+    "rear_arm_outer_corner_radius": +0.30,
 }
 
 # ---------------------------------------------------------------------------
@@ -201,8 +201,16 @@ MAX_RIM_FEATURE_OFFSET_MM: Dict[str, float] = {
 # Physical basis: annular average of N blades of mass m_blade each,
 # rotating at omega_ref with CG at r_cg.
 # F_total = N * m_blade * omega_ref^2 * r_cg  [N]
-# Applied as radial traction on the rear drive-arm load-transfer boundary
-# (the vertical rear_arm_end_face at x = +t_rim/2 + arm projection).
+#
+# Applied as radial traction on the rim-top / blade-attachment surface:
+# the horizontal boundary at r = r5 + h_arm (ligament + arm land face).
+# This represents blades pulling the disc rim radially outward through the
+# blade-root attachment region at the outer rim.
+#
+# The rear drive arm receives NO direct blade load by default.
+# The arm experiences stress only through structural continuity with the
+# loaded rim, disc centrifugal body force, and internal redistribution.
+#
 # This load is fixed (identical for every generated sample) — it is not part
 # of the LHS-sampled parameter space.
 # ---------------------------------------------------------------------------
