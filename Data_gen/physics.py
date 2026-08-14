@@ -11,7 +11,7 @@ selectable per zone (``lifing_mode="zonal"``) or uniform across the disc
 from __future__ import annotations
 
 import logging
-from typing import Dict
+from typing import Any, Dict
 
 import numpy as np
 from skfem import (
@@ -49,6 +49,9 @@ DENSITY_KG_M3 = 4430.0     # density [kg/m^3]
 OMEGA_REF_RAD_S = 4000.0   # takeoff rotational speed [rad/s]
 
 EPS = 1e-6
+RIM_TOP_X_TOL_M = 5e-4
+RIM_TOP_HORIZONTAL_TOL_M = 1e-6
+RIM_TOP_R_TOL_M = 2e-3
 
 
 def blade_equiv_force_n(omega: float) -> float:
@@ -65,6 +68,146 @@ def blade_equiv_force_n(omega: float) -> float:
     """
     r_cg_m = BLADE_EQUIV_CG_RADIUS_MM * 1e-3
     return float(BLADE_EQUIV_NUM_BLADES) * float(BLADE_EQUIV_MASS_KG) * (float(omega) ** 2) * r_cg_m
+
+
+def extract_rim_top_metadata(rim_face_metadata: Dict[str, np.ndarray] | None) -> Dict[str, float | None]:
+    """Return rim-top face metadata in mm and m from contour metadata."""
+    out: Dict[str, float | None] = {
+        "rim_top_r_mm": None,
+        "rim_top_x_min_mm": None,
+        "rim_top_x_max_mm": None,
+        "rim_top_r_m": None,
+        "rim_top_x_min_m": None,
+        "rim_top_x_max_m": None,
+    }
+    if rim_face_metadata is None:
+        return out
+    if "blade_rim_top_r_mm" in rim_face_metadata:
+        out["rim_top_r_mm"] = float(np.asarray(rim_face_metadata["blade_rim_top_r_mm"]).reshape(-1)[0])
+        out["rim_top_r_m"] = float(out["rim_top_r_mm"]) * 1e-3
+    if "blade_rim_top_x_min_mm" in rim_face_metadata:
+        out["rim_top_x_min_mm"] = float(np.asarray(rim_face_metadata["blade_rim_top_x_min_mm"]).reshape(-1)[0])
+        out["rim_top_x_min_m"] = float(out["rim_top_x_min_mm"]) * 1e-3
+    if "blade_rim_top_x_max_mm" in rim_face_metadata:
+        out["rim_top_x_max_mm"] = float(np.asarray(rim_face_metadata["blade_rim_top_x_max_mm"]).reshape(-1)[0])
+        out["rim_top_x_max_m"] = float(out["rim_top_x_max_mm"]) * 1e-3
+    return out
+
+
+def select_blade_rim_top_facets(
+    mesh: MeshTri,
+    radial_breaks_m: np.ndarray | None = None,
+    rim_top_r_m: float | None = None,
+    rim_top_x_min_m: float | None = None,
+    rim_top_x_max_m: float | None = None,
+) -> Dict[str, Any]:
+    """Reproduce the production blade-load facet selection and audit metadata."""
+    bf_ids = mesh.boundary_facets()
+    if bf_ids.size == 0:
+        empty = np.empty(0, dtype=np.float64)
+        return {
+            "boundary_facet_ids": np.empty(0, dtype=int),
+            "facet_ids": np.empty(0, dtype=int),
+            "facet_mid_x_m": empty,
+            "facet_mid_r_m": empty,
+            "facet_lengths_m": empty,
+            "facet_delta_x_m": empty,
+            "facet_delta_r_m": empty,
+            "facet_radius_deviation_m": empty,
+            "used_fallback": rim_top_r_m is None,
+            "rim_top_r_m": rim_top_r_m,
+            "rim_top_x_min_m": rim_top_x_min_m,
+            "rim_top_x_max_m": rim_top_x_max_m,
+        }
+
+    fv_x = mesh.p[0, mesh.facets[:, bf_ids]]
+    fv_r = mesh.p[1, mesh.facets[:, bf_ids]]
+    mid_x = fv_x.mean(axis=0)
+    mid_r = fv_r.mean(axis=0)
+    dx = fv_x[1] - fv_x[0]
+    dr = fv_r[1] - fv_r[0]
+    ds = np.sqrt(dx ** 2 + dr ** 2)
+
+    used_fallback = rim_top_r_m is None
+    if rim_top_r_m is not None:
+        rim_mask = (
+            (np.abs(dr) < RIM_TOP_HORIZONTAL_TOL_M)
+            & (mid_r >= rim_top_r_m - RIM_TOP_R_TOL_M)
+            & (mid_r <= rim_top_r_m + RIM_TOP_R_TOL_M)
+        )
+        if rim_top_x_min_m is not None and rim_top_x_max_m is not None:
+            rim_mask = (
+                rim_mask
+                & (mid_x >= rim_top_x_min_m - RIM_TOP_X_TOL_M)
+                & (mid_x <= rim_top_x_max_m + RIM_TOP_X_TOL_M)
+            )
+    else:
+        if radial_breaks_m is not None and len(radial_breaks_m) > 4:
+            r4_m = float(radial_breaks_m[4])
+        else:
+            r4_m = float(mesh.p[1].max()) - 0.020
+        rim_zone_mask = mesh.p[1] >= r4_m * 0.95
+        r_top_m = float(mesh.p[1, rim_zone_mask].max()) if np.any(rim_zone_mask) else float(mesh.p[1].max())
+        rim_mask = (
+            (np.abs(dr) < RIM_TOP_HORIZONTAL_TOL_M)
+            & (mid_r >= r_top_m - RIM_TOP_R_TOL_M)
+        )
+        rim_top_r_m = r_top_m
+
+    selected = bf_ids[rim_mask]
+    radius_deviation = mid_r[rim_mask] - float(rim_top_r_m) if selected.size > 0 and rim_top_r_m is not None else np.empty(0, dtype=np.float64)
+    return {
+        "boundary_facet_ids": bf_ids.astype(int),
+        "facet_ids": selected.astype(int),
+        "facet_mid_x_m": mid_x[rim_mask].astype(np.float64),
+        "facet_mid_r_m": mid_r[rim_mask].astype(np.float64),
+        "facet_lengths_m": ds[rim_mask].astype(np.float64),
+        "facet_delta_x_m": dx[rim_mask].astype(np.float64),
+        "facet_delta_r_m": dr[rim_mask].astype(np.float64),
+        "facet_radius_deviation_m": radius_deviation.astype(np.float64),
+        "used_fallback": used_fallback,
+        "rim_top_r_m": rim_top_r_m,
+        "rim_top_x_min_m": rim_top_x_min_m,
+        "rim_top_x_max_m": rim_top_x_max_m,
+    }
+
+
+def compute_blade_rim_face_geometry(selection: Dict[str, Any]) -> Dict[str, float]:
+    """Return effective meridional length, mean radius, and axisymmetric area."""
+    lengths = np.asarray(selection["facet_lengths_m"], dtype=np.float64)
+    radii = np.asarray(selection["facet_mid_r_m"], dtype=np.float64)
+    face_length_m = float(lengths.sum()) if lengths.size else 0.0
+    mean_radius_m = float(radii.mean()) if radii.size else 0.0
+    face_area_m2 = float(np.sum(2.0 * np.pi * radii * lengths)) if lengths.size else 0.0
+    return {
+        "face_length_m": face_length_m,
+        "mean_radius_m": mean_radius_m,
+        "face_area_m2": face_area_m2,
+    }
+
+
+def compute_blade_rim_traction_pa(
+    target_force_n: float,
+    mean_radius_m: float,
+    face_length_m: float,
+) -> float:
+    """Return uniform radial traction that recovers the requested resultant."""
+    if target_force_n <= 0.0 or mean_radius_m <= 1e-12 or face_length_m <= 1e-12:
+        return 0.0
+    return float(target_force_n) / (2.0 * np.pi * float(mean_radius_m) * float(face_length_m))
+
+
+def recover_blade_rim_resultant_n(
+    traction_pa: float,
+    facet_mid_r_m: np.ndarray,
+    facet_lengths_m: np.ndarray,
+) -> float:
+    """Integrate the axisymmetric traction over the selected facets."""
+    radii = np.asarray(facet_mid_r_m, dtype=np.float64)
+    lengths = np.asarray(facet_lengths_m, dtype=np.float64)
+    if traction_pa == 0.0 or radii.size == 0 or lengths.size == 0:
+        return 0.0
+    return float(np.sum(float(traction_pa) * (2.0 * np.pi * radii * lengths)))
 
 # Zone names ordered by zone id (0..4) for fast vectorised parameter lookup.
 _ZONE_NAMES_BY_ID = [ZONE_ID_TO_NAME[i] for i in range(len(ZONE_ID_TO_NAME))]
@@ -109,7 +252,10 @@ def _strain_components(u, w):
 def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray | None = None,
                         rim_top_r_m: float | None = None,
                         rim_top_x_min_m: float | None = None,
-                        rim_top_x_max_m: float | None = None):
+                        rim_top_x_max_m: float | None = None,
+                        include_body_force: bool = True,
+                        include_blade_rim_load: bool = True,
+                        return_diagnostics: bool = False):
     """Assemble and solve the axisymmetric elasticity system at angular speed omega.
 
     Coordinates of ``mesh`` are expected in METRES.  Returns nodal stress
@@ -151,62 +297,30 @@ def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray
         return f_r * vr * r
 
     K = stiffness.assemble(basis)
-    f = body_load.assemble(basis)
+    f = body_load.assemble(basis) if include_body_force else np.zeros(basis.N, dtype=np.float64)
 
     # --- Blade-equivalent centrifugal traction on the rim-top blade-attachment face ---
-    f_total = blade_equiv_force_n(omega)  # [N]
-
-    bf_ids = mesh.boundary_facets()
-    if bf_ids.size > 0:
-        fv_x = mesh.p[0, mesh.facets[:, bf_ids]]  # (2, n_bf)
-        fv_r = mesh.p[1, mesh.facets[:, bf_ids]]  # (2, n_bf)
-        mid_x = fv_x.mean(axis=0)
-        mid_r = fv_r.mean(axis=0)
-        dr = np.abs(fv_r[0] - fv_r[1])
-        x_tol = 5e-4   # 0.5 mm tolerance in metres
-        horiz_tol = 1e-6  # near-zero delta-r for nearly-horizontal facets
-
-        if rim_top_r_m is not None:
-            # Precise geometry-tagged selection: rim-top face at r ~ rim_top_r_m.
-            # Selects the ligament + arm land horizontal segments at r = r5 + h_arm.
-            r_tol = 2e-3   # 2 mm radial tolerance
-            rim_mask = (
-                (dr < horiz_tol)
-                & (mid_r >= rim_top_r_m - r_tol)
-                & (mid_r <= rim_top_r_m + r_tol)
-            )
-            if rim_top_x_min_m is not None and rim_top_x_max_m is not None:
-                rim_mask = rim_mask & (mid_x >= rim_top_x_min_m - x_tol) & (mid_x <= rim_top_x_max_m + x_tol)
-        else:
-            # Fallback: highest nearly-horizontal facets in the rim zone.
-            if radial_breaks_m is not None and len(radial_breaks_m) > 4:
-                r4_m = float(radial_breaks_m[4])
-            else:
-                r4_m = float(mesh.p[1].max()) - 0.020
-            rim_zone_mask = mesh.p[1] >= r4_m * 0.95
-            r_top_m = float(mesh.p[1, rim_zone_mask].max()) if np.any(rim_zone_mask) else float(mesh.p[1].max())
-            r_tol = 2e-3
-            rim_mask = (
-                (dr < horiz_tol)
-                & (mid_r >= r_top_m - r_tol)
-            )
-
-        rim_facets = bf_ids[rim_mask]
-    else:
-        rim_facets = np.empty(0, dtype=int)
-
-    if rim_facets.size > 0 and f_total > 0.0:
-        fb = FacetBasis(mesh, element, facets=rim_facets)
-
-        # Traction t_r [Pa] s.t. integral(t_r * 2*pi*r * ds) = f_total,
-        # approximated with the mean radius and total arc length of the face.
-        r_face_mid = float(mid_r[rim_mask].mean())
-        dv = mesh.p[:, mesh.facets[0, rim_facets]] - mesh.p[:, mesh.facets[1, rim_facets]]
-        l_face = float(np.sqrt((dv ** 2).sum(axis=0)).sum())
-        if l_face > 1e-9 and r_face_mid > 1e-9:
-            t_r = f_total / (2.0 * np.pi * r_face_mid * l_face)
-        else:
-            t_r = 0.0
+    f_total = blade_equiv_force_n(omega) if include_blade_rim_load else 0.0  # [N]
+    selection = select_blade_rim_top_facets(
+        mesh=mesh,
+        radial_breaks_m=radial_breaks_m,
+        rim_top_r_m=rim_top_r_m,
+        rim_top_x_min_m=rim_top_x_min_m,
+        rim_top_x_max_m=rim_top_x_max_m,
+    )
+    face_geom = compute_blade_rim_face_geometry(selection)
+    t_r = compute_blade_rim_traction_pa(
+        target_force_n=f_total,
+        mean_radius_m=face_geom["mean_radius_m"],
+        face_length_m=face_geom["face_length_m"],
+    )
+    recovered_force_n = recover_blade_rim_resultant_n(
+        traction_pa=t_r,
+        facet_mid_r_m=selection["facet_mid_r_m"],
+        facet_lengths_m=selection["facet_lengths_m"],
+    )
+    if selection["facet_ids"].size > 0 and f_total > 0.0:
+        fb = FacetBasis(mesh, element, facets=selection["facet_ids"])
 
         @LinearForm
         def blade_traction(v, w):
@@ -232,7 +346,134 @@ def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray
 
     # Recover nodal stresses by projecting element-wise stress onto P2 nodes.
     sxx, srr, stt, sxr = _nodal_stresses(basis, x, C)
-    return basis, sxx, srr, stt, sxr
+    if not return_diagnostics:
+        return basis, sxx, srr, stt, sxr
+    closure_error = abs(recovered_force_n - f_total) / max(abs(f_total), 1e-12) if f_total > 0.0 else 0.0
+    diagnostics = {
+        "include_body_force": bool(include_body_force),
+        "include_blade_rim_load": bool(include_blade_rim_load),
+        "target_force_n": float(f_total),
+        "traction_pa": float(t_r),
+        "recovered_force_n": float(recovered_force_n),
+        "closure_error_rel": float(closure_error),
+        "used_fallback": bool(selection["used_fallback"]),
+        "selected_facet_ids": np.asarray(selection["facet_ids"], dtype=int),
+        "selected_facet_mid_x_m": np.asarray(selection["facet_mid_x_m"], dtype=np.float64),
+        "selected_facet_mid_r_m": np.asarray(selection["facet_mid_r_m"], dtype=np.float64),
+        "selected_facet_lengths_m": np.asarray(selection["facet_lengths_m"], dtype=np.float64),
+        "selected_facet_delta_x_m": np.asarray(selection["facet_delta_x_m"], dtype=np.float64),
+        "selected_facet_delta_r_m": np.asarray(selection["facet_delta_r_m"], dtype=np.float64),
+        "selected_facet_radius_deviation_m": np.asarray(selection["facet_radius_deviation_m"], dtype=np.float64),
+        "face_length_m": float(face_geom["face_length_m"]),
+        "mean_radius_m": float(face_geom["mean_radius_m"]),
+        "face_area_m2": float(face_geom["face_area_m2"]),
+        "rim_top_r_m": None if selection["rim_top_r_m"] is None else float(selection["rim_top_r_m"]),
+        "rim_top_x_min_m": None if selection["rim_top_x_min_m"] is None else float(selection["rim_top_x_min_m"]),
+        "rim_top_x_max_m": None if selection["rim_top_x_max_m"] is None else float(selection["rim_top_x_max_m"]),
+    }
+    return basis, sxx, srr, stt, sxr, diagnostics
+
+
+def solve_axisymmetric_response(
+    nodes: np.ndarray,
+    zone_ids: np.ndarray,
+    region_ids: np.ndarray,
+    geometry_params: Dict[str, float],
+    radial_breaks: np.ndarray,
+    mesh_obj,
+    triangles: np.ndarray,
+    rim_face_metadata: Dict[str, np.ndarray] | None = None,
+    include_body_force: bool = True,
+    include_blade_rim_load: bool = True,
+) -> Dict[str, Any]:
+    """Solve the production axisymmetric FEM state and return fields plus diagnostics."""
+    n_nodes = nodes.shape[0]
+    n_phases = CYCLE_SPEED_FACTORS.shape[0]
+    meta = extract_rim_top_metadata(rim_face_metadata)
+    try:
+        mesh_m = MeshTri(mesh_obj.p * 1e-3, mesh_obj.t)
+        basis, sxx, srr, stt, sxr, diagnostics = _assemble_and_solve(
+            mesh_m,
+            OMEGA_REF_RAD_S,
+            radial_breaks_m=radial_breaks * 1e-3,
+            rim_top_r_m=meta["rim_top_r_m"],
+            rim_top_x_min_m=meta["rim_top_x_min_m"],
+            rim_top_x_max_m=meta["rim_top_x_max_m"],
+            include_body_force=include_body_force,
+            include_blade_rim_load=include_blade_rim_load,
+            return_diagnostics=True,
+        )
+
+        sxx = sxx * 1e-6
+        srr = srr * 1e-6
+        stt = stt * 1e-6
+        sxr = sxr * 1e-6
+        base_vm = np.sqrt(
+            0.5 * ((sxx - srr) ** 2 + (srr - stt) ** 2 + (stt - sxx) ** 2 + 6.0 * sxr ** 2)
+        )
+        if base_vm.shape[0] != n_nodes:
+            raise RuntimeError(f"FEM nodal stress count {base_vm.shape[0]} != node count {n_nodes}")
+        phase_scale = CYCLE_SPEED_FACTORS ** 2
+        phase_stress = base_vm[:, None] * phase_scale[None, :]
+        return {
+            "ok": True,
+            "basis": basis,
+            "stress_components_mpa": {
+                "sxx": sxx.astype(np.float64),
+                "srr": srr.astype(np.float64),
+                "stt": stt.astype(np.float64),
+                "sxr": sxr.astype(np.float64),
+            },
+            "base_vm_mpa": base_vm.astype(np.float64),
+            "phase_stress_mpa": phase_stress.astype(np.float64),
+            "load_diagnostics": diagnostics,
+            "metadata": meta,
+        }
+    except Exception as exc:  # noqa: BLE001 — must not crash dataset generation
+        logger.warning(
+            "Axisymmetric FEM solve failed (%s: %s); returning zero stress. "
+            "geometry_params=%s",
+            type(exc).__name__,
+            exc,
+            geometry_params,
+        )
+        return {
+            "ok": False,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "basis": None,
+            "stress_components_mpa": {
+                "sxx": np.zeros(n_nodes, dtype=np.float64),
+                "srr": np.zeros(n_nodes, dtype=np.float64),
+                "stt": np.zeros(n_nodes, dtype=np.float64),
+                "sxr": np.zeros(n_nodes, dtype=np.float64),
+            },
+            "base_vm_mpa": np.zeros(n_nodes, dtype=np.float64),
+            "phase_stress_mpa": np.zeros((n_nodes, n_phases), dtype=np.float64),
+            "load_diagnostics": {
+                "include_body_force": bool(include_body_force),
+                "include_blade_rim_load": bool(include_blade_rim_load),
+                "target_force_n": float(blade_equiv_force_n(OMEGA_REF_RAD_S) if include_blade_rim_load else 0.0),
+                "traction_pa": 0.0,
+                "recovered_force_n": 0.0,
+                "closure_error_rel": 1.0 if include_blade_rim_load else 0.0,
+                "used_fallback": bool(meta["rim_top_r_m"] is None),
+                "selected_facet_ids": np.empty(0, dtype=int),
+                "selected_facet_mid_x_m": np.empty(0, dtype=np.float64),
+                "selected_facet_mid_r_m": np.empty(0, dtype=np.float64),
+                "selected_facet_lengths_m": np.empty(0, dtype=np.float64),
+                "selected_facet_delta_x_m": np.empty(0, dtype=np.float64),
+                "selected_facet_delta_r_m": np.empty(0, dtype=np.float64),
+                "selected_facet_radius_deviation_m": np.empty(0, dtype=np.float64),
+                "face_length_m": 0.0,
+                "mean_radius_m": 0.0,
+                "face_area_m2": 0.0,
+                "rim_top_r_m": meta["rim_top_r_m"],
+                "rim_top_x_min_m": meta["rim_top_x_min_m"],
+                "rim_top_x_max_m": meta["rim_top_x_max_m"],
+            },
+            "metadata": meta,
+        }
 
 
 def _nodal_stresses(basis, x, C):
@@ -297,6 +538,8 @@ def compute_phase_equivalent_stresses(
     mesh_obj,
     triangles: np.ndarray,
     rim_face_metadata: Dict[str, np.ndarray] | None = None,
+    include_body_force: bool = True,
+    include_blade_rim_load: bool = True,
 ) -> np.ndarray:
     """Axisymmetric FEM von Mises stress field scaled across the 7 flight phases.
 
@@ -323,62 +566,19 @@ def compute_phase_equivalent_stresses(
     -------
     (N, 7) float64 array of von Mises stress per flight phase, in MPa.
     """
-    n_nodes = nodes.shape[0]
-    n_phases = CYCLE_SPEED_FACTORS.shape[0]
-
-    # Extract rim-top face bounds from metadata for precise traction application.
-    rim_top_r_m = None
-    rim_top_x_min_m = None
-    rim_top_x_max_m = None
-    if rim_face_metadata is not None:
-        if "blade_rim_top_r_mm" in rim_face_metadata:
-            rim_top_r_m = float(rim_face_metadata["blade_rim_top_r_mm"][0]) * 1e-3
-        if "blade_rim_top_x_min_mm" in rim_face_metadata:
-            rim_top_x_min_m = float(rim_face_metadata["blade_rim_top_x_min_mm"][0]) * 1e-3
-        if "blade_rim_top_x_max_mm" in rim_face_metadata:
-            rim_top_x_max_m = float(rim_face_metadata["blade_rim_top_x_max_mm"][0]) * 1e-3
-
-    try:
-        mesh_m = MeshTri(mesh_obj.p * 1e-3, mesh_obj.t)
-
-        basis, sxx, srr, stt, sxr = _assemble_and_solve(
-            mesh_m, OMEGA_REF_RAD_S,
-            radial_breaks_m=radial_breaks * 1e-3,
-            rim_top_r_m=rim_top_r_m,
-            rim_top_x_min_m=rim_top_x_min_m,
-            rim_top_x_max_m=rim_top_x_max_m,
-        )
-
-        # Stresses come back in Pa -> convert to MPa.
-        sxx = sxx * 1e-6
-        srr = srr * 1e-6
-        stt = stt * 1e-6
-        sxr = sxr * 1e-6
-
-        base_vm = np.sqrt(
-            0.5 * ((sxx - srr) ** 2 + (srr - stt) ** 2 + (stt - sxx) ** 2 + 6.0 * sxr ** 2)
-        )
-
-        # Vertex ordering of mesh_m matches the input `nodes` ordering, since the
-        # mesh was built from those vertices.  Guard against any mismatch.
-        if base_vm.shape[0] != n_nodes:
-            raise RuntimeError(
-                f"FEM nodal stress count {base_vm.shape[0]} != node count {n_nodes}"
-            )
-
-        phase_scale = CYCLE_SPEED_FACTORS ** 2
-        phase_stress = base_vm[:, None] * phase_scale[None, :]
-        return phase_stress.astype(np.float64)
-
-    except Exception as exc:  # noqa: BLE001 — must not crash dataset generation
-        logger.warning(
-            "Axisymmetric FEM solve failed (%s: %s); returning zero stress. "
-            "geometry_params=%s",
-            type(exc).__name__,
-            exc,
-            geometry_params,
-        )
-        return np.zeros((n_nodes, n_phases), dtype=np.float64)
+    response = solve_axisymmetric_response(
+        nodes=nodes,
+        zone_ids=zone_ids,
+        region_ids=region_ids,
+        geometry_params=geometry_params,
+        radial_breaks=radial_breaks,
+        mesh_obj=mesh_obj,
+        triangles=triangles,
+        rim_face_metadata=rim_face_metadata,
+        include_body_force=include_body_force,
+        include_blade_rim_load=include_blade_rim_load,
+    )
+    return response["phase_stress_mpa"].astype(np.float64)
 
 
 def compute_stress_max(phase_stress: np.ndarray) -> np.ndarray:
