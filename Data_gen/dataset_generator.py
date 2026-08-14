@@ -207,7 +207,10 @@ def validate_lhs_spread(num_samples: int = 30, seed: int = 7) -> bool:
     sample0 = core_list[0]
     rf0 = rim_feature_list[0]
     rf1 = rim_feature_list[1]
-    from .sample_generator import generate_sample
+    try:
+        from .sample_generator import generate_sample
+    except ImportError:
+        from Data_gen.sample_generator import generate_sample
     s0 = generate_sample(param_offsets=sample0, representation="edge", seed=0, include_derivatives=False, rim_feature_offsets=rf0)
     s1 = generate_sample(param_offsets=sample0, representation="edge", seed=0, include_derivatives=False, rim_feature_offsets=rf1)
     fp0 = s0["rim_feature_parameters_actual"]

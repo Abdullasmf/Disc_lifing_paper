@@ -149,7 +149,7 @@ def _run_fem(contour, actual_params, actual_rim, radial_breaks):
         nodes=mesh.nodes,
         radial_breaks=radial_breaks,
     )
-    arm_meta = {k: v for k, v in contour.metadata.items() if k.startswith("blade_arm_face_")}
+    rim_meta = {k: v for k, v in contour.metadata.items() if k.startswith("blade_rim_top_")}
     phase_stress = compute_phase_equivalent_stresses(
         nodes=mesh.nodes,
         zone_ids=zone_ids,
@@ -158,7 +158,7 @@ def _run_fem(contour, actual_params, actual_rim, radial_breaks):
         radial_breaks=radial_breaks,
         mesh_obj=mesh.mesh,
         triangles=mesh.triangles,
-        arm_face_metadata=arm_meta,
+        rim_face_metadata=rim_meta,
     )
     stress_max = compute_stress_max(phase_stress)
     life_raw = compute_life_raw(
