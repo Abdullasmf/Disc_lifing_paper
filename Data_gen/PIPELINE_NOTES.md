@@ -12,7 +12,7 @@ geometry.py        → build_disc_contour() → ContourData (points, zone_ids, s
 mesh_ops.py        → generate_mesh()  → MeshData (MeshTri, nodes, triangles)
         ↓
 physics.py         → axisymmetric FEM solve (scikit-fem, Ti-6Al-4V, 4000 rad/s)
-                   → blade-equivalent traction on rear arm end face
+                   → blade-equivalent traction on rim-top blade-attachment face
                    → phase stress scaling (7 flight phases)
                    → Palmgren-Miner fatigue life (zonal or uniform S-N)
         ↓
@@ -41,6 +41,7 @@ dataset_generator.py → generate_dataset() (LHS or explicit offsets, batch)
 | `mesh_feature_diagnostics.py` | Feature-neighbourhood mesh + stress diagnostics |
 | `compare_mesh_feature_diagnostics.py` | Medium vs fine mesh convergence comparison |
 | `analyze_locality_probe.py` | Local feature-neighbourhood stress/life report |
+| `validate_rim_load_and_physics.py` | Rim-load placement, closure, phase-scaling, decomposition, validity, and LHS-sanitization audit |
 
 ---
 
@@ -92,6 +93,9 @@ The previous smooth flange/collar geometry has been replaced with:
   r ≈ rim_top_r_m instead of vertical arm end-face facets.
 - `compute_phase_equivalent_stresses()` parameter renamed `arm_face_metadata` →
   `rim_face_metadata`; metadata keys updated to `blade_rim_top_*`.
+- Shared helpers now expose production-consistent facet selection, load-face
+  geometry, traction, resultant recovery, and optional body/rim load toggles for
+  validation-only decomposition runs.
 
 #### `sample_generator.py`
 - Metadata key prefix updated from `blade_arm_face_` to `blade_rim_top_`.
@@ -232,6 +236,139 @@ r_mid ≈ 115 mm
 t_r = F / (2π × r_mid × l_face) ≈ 21 MPa
 ```
 
+Production and validation share the same helpers in `physics.py`:
+
+- `select_blade_rim_top_facets(...)`
+- `compute_blade_rim_face_geometry(...)`
+- `compute_blade_rim_traction_pa(...)`
+- `recover_blade_rim_resultant_n(...)`
+- `solve_axisymmetric_response(...)`
+
+Optional validation toggles are available without changing production defaults:
+
+```python
+include_body_force=True
+include_blade_rim_load=True
+```
+
+---
+
+## Rim-load and physics validation
+
+`validate_rim_load_and_physics.py` complements the existing contour, FEM, mesh,
+and locality checks. It rebuilds the production contour, remeshes with the
+production mesh pipeline, reuses the production rim-top facet selection, and
+stores machine-readable evidence for:
+
+- actual loaded rim-top facets and their geometry;
+- force-resultant recovery and phase-force scaling;
+- stress scaling with `ω²`;
+- body-only / rim-load-only / combined-load decomposition;
+- nominal, extrema, coupled, and LHS physical validity;
+- requested vs actual LHS coverage after sanitization/clipping.
+
+### CLI
+
+```bash
+python Data_gen/validate_rim_load_and_physics.py --case nominal
+python Data_gen/validate_rim_load_and_physics.py --case extrema
+python Data_gen/validate_rim_load_and_physics.py --case lhs --num-samples 20 --seed 7
+python Data_gen/validate_rim_load_and_physics.py --case all --num-samples 20 --seed 7
+```
+
+Optional arguments:
+
+```bash
+--output-dir Data_gen/output/rim_load_validation
+--mesh medium
+--mesh fine
+--save-plots
+--fail-on-invalid
+--num-samples 20
+--seed 7
+```
+
+### Saved outputs
+
+- one JSON result file per analysed geometry/case;
+- `all_cases_summary.csv`;
+- `summary.json`;
+- `lhs_coverage_requested.csv`;
+- `lhs_coverage_actual.csv`;
+- `lhs_sanitization_summary.json`;
+- optional PNGs:
+  - selected blade-load face overlays;
+  - decomposition stress and log-life fields;
+  - requested-vs-actual LHS scatter plots;
+  - parameter coverage panel figures.
+
+### Force-resultant closure and phase scaling
+
+The validator checks:
+
+```text
+t_r = F_blade / (2π r̄ l_face)
+F_recovered = Σ t_r (2π r_i Δs_i)
+```
+
+Expected acceptance:
+
+- selected facet set is non-empty;
+- no clearly unintended loaded facets;
+- closure error ≤ 1 %;
+- phase stresses and blade-resultant scaling remain consistent with `ω²`.
+
+### Load decomposition
+
+Nominal geometry is re-solved for:
+
+- `body_only`
+- `rim_load_only`
+- `combined`
+
+The saved outputs include peak stress, peak location, local p90 stresses,
+minimum life, median life, median `log10(life)`, life-threshold fractions, and
+force metadata for each load split.
+
+### Physical-validity thresholds
+
+- preferred nominal peak-stress band: `300–1300 MPa`
+- warning peak-stress band: `1300–1500 MPa`
+- invalid peak stress: `>1500 MPa`
+- invalid life: `<1 cycle`
+
+### PASS / WARNING / FAIL
+
+- `FAIL`
+  - contour/mesh/FEM generation failure;
+  - empty blade-load face;
+  - force-closure error > 1 %;
+  - selected facet outside the intended rim-top interval;
+  - global peak stress > 1500 MPa;
+  - any node with life < 1 cycle.
+- `WARNING`
+  - peak stress in `1300–1500 MPa`;
+  - any node with `1 ≤ N < 10`;
+  - excessive sanitization/clipping;
+  - actual LHS coverage substantially smaller than the configured range.
+- `PASS`
+  - geometry, mesh, load-face selection, force closure, stress, and life all
+    remain within the acceptance limits.
+
+### Interpreting clipping and coverage
+
+- High `fraction_changed_by_sanitizer` means the requested LHS space is pushing
+  against constructibility limits rather than producing distinct final FEM
+  geometries.
+- Low `actual_range_over_intended_range` means the final geometry range seen by
+  FEM is narrower than the configured offset range.
+- Repeated hits at active lower/upper limits identify which constraints dominate
+  the sampled design space.
+- Parameter status definitions:
+  - `PASS`: actual range ≥ 70 % of intended range and < 10 % clipped;
+  - `WARNING`: actual range 40–70 % or 10–30 % clipped;
+  - `FAIL`: actual range < 40 %, > 30 % clipped, or near-zero final spread.
+
 ---
 
 ## HDF5 schema (v5.0, backward compatible)
@@ -280,6 +417,20 @@ python Data_gen/validate_contour.py --skip-stress
 
 # FEM nominal validation
 python Data_gen/validate_fem_nominal.py
+
+# Rim-load nominal audit
+python Data_gen/validate_rim_load_and_physics.py --case nominal --mesh medium --save-plots
+
+# Rim-load extrema audit
+python Data_gen/validate_rim_load_and_physics.py --case extrema --mesh medium
+
+# Rim-load LHS audit
+python Data_gen/validate_rim_load_and_physics.py \
+    --case lhs \
+    --num-samples 20 \
+    --seed 7 \
+    --mesh medium \
+    --save-plots
 
 # Example sample plot
 python Data_gen/plot_example_sample.py

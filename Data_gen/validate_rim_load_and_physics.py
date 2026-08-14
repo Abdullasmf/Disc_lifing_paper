@@ -220,13 +220,13 @@ def _phase_scaling_audit(phase_stress: np.ndarray, nodes: np.ndarray, contour, r
     expected = CYCLE_SPEED_FACTORS ** 2
     per_landmark: Dict[str, Any] = {}
     worst_error = 0.0
-    for name, radius in iter_landmark_neighbourhoods():
+    for name, radius in LANDMARK_NEIGHBOURHOODS_MM.items():
         if name not in centres:
             continue
         idx = _local_indices(tree, centres[name], radius, len(nodes))
         ref = float(np.percentile(phase_stress[idx, REF_PHASE_INDEX], 90))
         ratios = []
-        for phase_name, phase_idx, scale in zip(CYCLE_PHASES, range(len(CYCLE_PHASES)), expected):
+        for phase_idx, (phase_name, scale) in enumerate(zip(CYCLE_PHASES, expected)):
             value = float(np.percentile(phase_stress[idx, phase_idx], 90))
             ratio = value / max(ref, 1e-12)
             err = abs(ratio - float(scale))
@@ -246,14 +246,6 @@ def _phase_scaling_audit(phase_stress: np.ndarray, nodes: np.ndarray, contour, r
         "worst_relative_error_pct": float(100.0 * worst_error / max(float(np.max(expected)), 1e-12)),
         "landmarks": per_landmark,
     }
-
-
-def landmark_neighbourhood_keys() -> Iterable[str]:
-    return LANDMARK_NEIGHBOURHOODS_MM.keys()
-
-
-def iter_landmark_neighbourhoods() -> Iterable[Tuple[str, float]]:
-    return LANDMARK_NEIGHBOURHOODS_MM.items()
 
 
 def _life_stats(life_raw: np.ndarray) -> Dict[str, float]:
@@ -386,7 +378,7 @@ def _resultant_force_audit(load_diag: Dict[str, Any]) -> Dict[str, Any]:
             "traction_pa": traction,
             "traction_mpa": traction * 1e-6,
             "recovered_resultant_force_n": recovered,
-            "closure_error_rel": float(abs(recovered - target_force) / max(abs(target_force), 1e-12)) if target_force > 0.0 else 0.0,
+            "closure_error_rel": float(abs(recovered - target_force) / max(abs(target_force), 1e-12)) if abs(target_force) > 0.0 else 0.0,
             "effective_area_m2": float(np.sum(2.0 * np.pi * facet_r * facet_l)),
         })
     for item in phases:
@@ -571,6 +563,61 @@ def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _save_lhs_plots(out_dir: Path, lhs_results: List[Dict[str, Any]]) -> None:
+    plot_dir = _ensure_dir(out_dir / "lhs_plots")
+    for group_name, params in [("core", PUBLIC_GEOMETRY_PARAMETERS), ("rim_feature", RIM_FEATURE_PARAMETERS)]:
+        for param in params:
+            if group_name == "core":
+                x = np.array([r["resolved_core"][param] for r in lhs_results], dtype=np.float64)
+                y = np.array([r["actual_core"][param] for r in lhs_results], dtype=np.float64)
+            else:
+                x = np.array([r["resolved_rim"][param] for r in lhs_results], dtype=np.float64)
+                y = np.array([r["actual_rim"][param] for r in lhs_results], dtype=np.float64)
+            clipped = np.abs(y - x) > 1e-9
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.scatter(x[~clipped], y[~clipped], c="tab:blue", s=20, label="unchanged")
+            if np.any(clipped):
+                ax.scatter(x[clipped], y[clipped], c="tab:red", s=28, marker="x", label="clipped")
+            lo = float(min(np.min(x), np.min(y)))
+            hi = float(max(np.max(x), np.max(y)))
+            ax.plot([lo, hi], [lo, hi], "k--", lw=1.0, label="y=x")
+            ax.set_xlabel("resolved pre-sanitization value [mm]")
+            ax.set_ylabel("final sanitized value [mm]")
+            ax.set_title(f"{group_name}: {param}")
+            ax.legend(fontsize=7, loc="best")
+            fig.tight_layout()
+            fig.savefig(plot_dir / f"{group_name}_{param}_requested_vs_actual.png", dpi=180)
+            plt.close(fig)
+
+    ordered = [("core", list(PUBLIC_GEOMETRY_PARAMETERS)), ("rim_feature", list(RIM_FEATURE_PARAMETERS))]
+    for group_name, params in ordered:
+        fig, axes = plt.subplots(len(params), 1, figsize=(7, max(2.2 * len(params), 6)), sharex=False)
+        if len(params) == 1:
+            axes = [axes]
+        for ax, param in zip(axes, params):
+            if group_name == "core":
+                requested = np.array([r["resolved_core"][param] for r in lhs_results], dtype=np.float64)
+                actual = np.array([r["actual_core"][param] for r in lhs_results], dtype=np.float64)
+                lo = NOMINAL_GEOMETRY_MM[param] + MIN_OFFSET_MM[param]
+                hi = NOMINAL_GEOMETRY_MM[param] + MAX_OFFSET_MM[param]
+            else:
+                requested = np.array([r["resolved_rim"][param] for r in lhs_results], dtype=np.float64)
+                actual = np.array([r["actual_rim"][param] for r in lhs_results], dtype=np.float64)
+                lo = NOMINAL_RIM_FEATURE_MM[param] + MIN_RIM_FEATURE_OFFSET_MM[param]
+                hi = NOMINAL_RIM_FEATURE_MM[param] + MAX_RIM_FEATURE_OFFSET_MM[param]
+            ax.axvline(lo, color="0.5", ls="--", lw=0.8)
+            ax.axvline(hi, color="0.5", ls="--", lw=0.8)
+            ax.scatter(requested, np.zeros_like(requested), c="tab:blue", s=18, label="requested/resolved")
+            ax.scatter(actual, np.ones_like(actual), c="tab:orange", s=18, label="actual")
+            ax.set_yticks([0.0, 1.0], ["requested", "actual"])
+            ax.set_title(param, fontsize=9, loc="left")
+            ax.grid(True, alpha=0.25)
+        axes[0].legend(fontsize=7, loc="upper right")
+        fig.tight_layout()
+        fig.savefig(plot_dir / f"{group_name}_coverage_panels.png", dpi=180)
+        plt.close(fig)
+
+
 def _build_case_specs(case: str, num_samples: int, seed: int) -> Tuple[List[Dict[str, Any]], bool]:
     specs: List[Dict[str, Any]] = []
     includes_lhs = False
@@ -688,7 +735,7 @@ def _decomposition_summary(case_result: Dict[str, Any], out_dir: Path, save_plot
         landmark_metrics = {}
         tree = cKDTree(nodes)
         centres = _landmark_centres(contour, radial_breaks)
-        for landmark, radius in landmark_neighbourhoods_for_decomp().items():
+        for landmark, radius in LANDMARK_NEIGHBOURHOODS_MM.items():
             if landmark not in centres:
                 continue
             idx = _local_indices(tree, centres[landmark], radius, len(nodes))
@@ -719,7 +766,7 @@ def _decomposition_summary(case_result: Dict[str, Any], out_dir: Path, save_plot
             outputs[load_name]["stress_plot"] = str(stress_path)
             outputs[load_name]["loglife_plot"] = str(life_path)
     classes = {}
-    for name in landmark_neighbourhood_keys():
+    for name in LANDMARK_NEIGHBOURHOODS_MM:
         values = {load: outputs[load]["landmark_p90_stress_mpa"].get(name, {}).get("p90_stress_mpa", 0.0) for load in DECOMPOSITION_LOADS}
         body = values.get("body_only", 0.0)
         rim = values.get("rim_load_only", 0.0)
@@ -731,10 +778,6 @@ def _decomposition_summary(case_result: Dict[str, Any], out_dir: Path, save_plot
             classes[name] = "mixed"
     outputs["landmark_classification"] = classes
     return outputs
-
-
-def landmark_neighbourhoods_for_decomp() -> Dict[str, float]:
-    return LANDMARK_NEIGHBOURHOODS_MM
 
 
 def validate_geometry_case(spec: Dict[str, Any], mesh_name: str, out_dir: Path, save_plots: bool) -> Dict[str, Any]:
@@ -809,13 +852,17 @@ def validate_geometry_case(spec: Dict[str, Any], mesh_name: str, out_dir: Path, 
         expected_x_min_mm = result["rim_top_metadata_mm"].get("blade_rim_top_x_min_mm")
         expected_x_max_mm = result["rim_top_metadata_mm"].get("blade_rim_top_x_max_mm")
         expected_r_mm = result["rim_top_metadata_mm"].get("blade_rim_top_r_mm")
-        face_outside_interval = bool(np.any(selected_x_mm < expected_x_min_mm - 0.5) or np.any(selected_x_mm > expected_x_max_mm + 0.5)) if selected_ids.size else False
+        face_outside_interval = (
+            bool(np.any(selected_x_mm < expected_x_min_mm - 0.5) or np.any(selected_x_mm > expected_x_max_mm + 0.5))
+            if selected_ids.size and expected_x_min_mm is not None and expected_x_max_mm is not None
+            else False
+        )
         face_bad_subzone = any(name not in INTENDED_RIM_LOAD_SUBZONES for name in selected_subzones)
         face_non_horizontal = bool(np.any(np.abs(np.asarray(load_diag["selected_facet_delta_r_m"], dtype=np.float64)) > 1e-6))
         tree = cKDTree(mesh.nodes)
         centres = _landmark_centres(contour, radial_breaks)
         landmark_metrics = {}
-        for landmark, radius in landmark_neighbourhoods_for_decomp().items():
+        for landmark, radius in LANDMARK_NEIGHBOURHOODS_MM.items():
             if landmark not in centres:
                 continue
             idx = _local_indices(tree, centres[landmark], radius, len(mesh.nodes))
@@ -854,6 +901,7 @@ def validate_geometry_case(spec: Dict[str, Any], mesh_name: str, out_dir: Path, 
             "mesh_valid": mesh_ok,
             "rim_load_selection_valid": bool(selected_ids.size > 0 and not face_outside_interval and not face_bad_subzone and not face_non_horizontal),
             "force_closure_valid": bool(float(load_diag["closure_error_rel"]) <= 0.01),
+            "closure_error_rel": float(load_diag["closure_error_rel"]),
             "landmark_metrics": landmark_metrics,
             "load_face_audit": {
                 "selected_facet_count": int(selected_ids.size),
@@ -929,7 +977,7 @@ def run_validation(case: str, output_dir: Path, mesh_name: str, save_plots: bool
             "selected_facet_count": clean.get("load_face_audit", {}).get("selected_facet_count"),
             "selected_face_length_mm": clean.get("load_face_audit", {}).get("selected_meridional_face_length_mm"),
             "loaded_face_area_mm2": clean.get("load_face_audit", {}).get("loaded_face_area_mm2"),
-            "closure_error_rel": (clean.get("force_resultant_audit", {}).get("phases", [{}])[REF_PHASE_INDEX].get("closure_error_rel") if clean.get("force_resultant_audit", {}).get("phases") else None),
+            "closure_error_rel": clean.get("closure_error_rel"),
             "status_reasons": ";".join(clean.get("status_reasons", [])),
         })
         if clean["group"] == "lhs":
@@ -975,6 +1023,8 @@ def run_validation(case: str, output_dir: Path, mesh_name: str, save_plots: bool
         _write_csv(out_dir / "lhs_coverage_actual.csv", lhs_rows_actual)
         coverage = _parameter_coverage(lhs_results)
         _write_json(out_dir / "lhs_sanitization_summary.json", coverage)
+        if save_plots and lhs_results:
+            _save_lhs_plots(out_dir, lhs_results)
     if fail_on_invalid and summary["fail_count"] > 0:
         return 1
     return 0

@@ -254,8 +254,7 @@ def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray
                         rim_top_x_min_m: float | None = None,
                         rim_top_x_max_m: float | None = None,
                         include_body_force: bool = True,
-                        include_blade_rim_load: bool = True,
-                        return_diagnostics: bool = False):
+                        include_blade_rim_load: bool = True):
     """Assemble and solve the axisymmetric elasticity system at angular speed omega.
 
     Coordinates of ``mesh`` are expected in METRES.  Returns nodal stress
@@ -346,8 +345,6 @@ def _assemble_and_solve(mesh: MeshTri, omega: float, radial_breaks_m: np.ndarray
 
     # Recover nodal stresses by projecting element-wise stress onto P2 nodes.
     sxx, srr, stt, sxr = _nodal_stresses(basis, x, C)
-    if not return_diagnostics:
-        return basis, sxx, srr, stt, sxr
     closure_error = abs(recovered_force_n - f_total) / max(abs(f_total), 1e-12) if f_total > 0.0 else 0.0
     diagnostics = {
         "include_body_force": bool(include_body_force),
@@ -401,7 +398,6 @@ def solve_axisymmetric_response(
             rim_top_x_max_m=meta["rim_top_x_max_m"],
             include_body_force=include_body_force,
             include_blade_rim_load=include_blade_rim_load,
-            return_diagnostics=True,
         )
 
         sxx = sxx * 1e-6

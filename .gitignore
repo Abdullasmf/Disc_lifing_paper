@@ -77,3 +77,4 @@ Expressions.xls
 *.sha256
 
 Data_gen/output/checksums.sha256
+Data_gen/output/rim_load_validation/
