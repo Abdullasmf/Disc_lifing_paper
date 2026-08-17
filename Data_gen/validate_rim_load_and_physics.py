@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import numpy as np
 from scipy.spatial import cKDTree
+from scipy.stats import spearmanr
 
 _repo_root = Path(__file__).resolve().parents[1]
 if str(_repo_root) not in sys.path:
@@ -21,10 +22,14 @@ if str(_repo_root) not in sys.path:
 
 import Data_gen.mesh_ops as _mesh_ops
 from Data_gen.config import (
+    CGROOVE_SAMPLING_CONTROLS,
+    COUPLED_CGROOVE_PARAMETERS,
     CYCLE_PHASES,
     CYCLE_SPEED_FACTORS,
+    MAX_CGROOVE_CONTROL,
     MAX_OFFSET_MM,
     MAX_RIM_FEATURE_OFFSET_MM,
+    MIN_CGROOVE_CONTROL,
     MIN_OFFSET_MM,
     MIN_RIM_FEATURE_OFFSET_MM,
     NOMINAL_GEOMETRY_MM,
@@ -34,12 +39,15 @@ from Data_gen.config import (
     SUBZONE_ID_TO_NAME,
     THICKNESS_ORDERING_GAP_MM,
     ZONE_ID_TO_NAME,
+    clip_cgroove_controls_to_bounds,
     clip_offsets_to_bounds,
     clip_rim_feature_offsets_to_bounds,
+    map_cgroove_controls_to_parameters,
     resolve_geometry_parameters,
     resolve_rim_feature_parameters,
 )
-from Data_gen.dataset_generator import sample_offsets_lhs, sample_rim_feature_offsets_lhs
+from Data_gen.dataset_generator import sample_offsets_lhs, sample_rim_feature_lhs_design
+from Data_gen.features import resample_contour_uniform_arc_length
 from Data_gen.geometry import (
     build_disc_contour,
     sanitize_geometry_parameters,
@@ -63,10 +71,14 @@ MESH_CONFIGS = {
 }
 LANDMARK_NEIGHBOURHOODS_MM = {
     "rim_core_reference": 4.0,
-    "lower_transition_start": 4.0,
-    "upper_transition_start": 4.0,
+    "lower_transition": 4.0,
+    "upper_transition": 4.0,
+    "front_cgroove_entry": 2.0,
     "front_cgroove_floor": 2.0,
+    "front_cgroove_exit": 2.0,
+    "rear_arm_root": 1.5,
     "rear_arm_neck": 1.5,
+    "rear_arm_outer_corner": 1.5,
 }
 PHYSICAL_THRESHOLDS = {
     "preferred_peak_low_mpa": 300.0,
@@ -146,12 +158,29 @@ def _flatten_dict(prefix: str, data: Dict[str, Any]) -> Dict[str, Any]:
     return flat
 
 
-def _build_geometry(core_offsets: Dict[str, float], rim_offsets: Dict[str, float]) -> Dict[str, Any]:
+def _build_geometry(
+    core_offsets: Dict[str, float],
+    rim_offsets: Dict[str, float],
+    cgroove_controls: Dict[str, float] | None = None,
+) -> Dict[str, Any]:
     requested_core_offsets = clip_offsets_to_bounds(core_offsets)
     requested_rim_offsets = clip_rim_feature_offsets_to_bounds(rim_offsets)
     resolved_core = resolve_geometry_parameters(requested_core_offsets)
     actual_core = sanitize_geometry_parameters(resolved_core)
     resolved_rim = resolve_rim_feature_parameters(requested_rim_offsets)
+    cgroove_controls_clipped = None
+    cgroove_mapping_metadata = None
+    if cgroove_controls is not None:
+        cgroove_controls_clipped = clip_cgroove_controls_to_bounds(cgroove_controls)
+        mapped_cgroove, cgroove_mapping_metadata = map_cgroove_controls_to_parameters(
+            controls=cgroove_controls_clipped,
+            resolved_rim=resolved_rim,
+            t_rim=actual_core["rim_thickness"],
+        )
+        resolved_rim = {**resolved_rim, **mapped_cgroove}
+        requested_rim_offsets = {
+            k: float(resolved_rim[k] - NOMINAL_RIM_FEATURE_MM[k]) for k in RIM_FEATURE_PARAMETERS
+        }
     actual_rim = sanitize_rim_feature_parameters(
         resolved_rim,
         t_rim=actual_core["rim_thickness"],
@@ -165,6 +194,8 @@ def _build_geometry(core_offsets: Dict[str, float], rim_offsets: Dict[str, float
         "resolved_rim": resolved_rim,
         "actual_core": actual_core,
         "actual_rim": actual_rim,
+        "cgroove_controls_requested": cgroove_controls_clipped,
+        "cgroove_mapping_metadata": cgroove_mapping_metadata,
         "contour": contour,
         "radial_breaks": contour.metadata["radial_breaks_mm"],
     }
@@ -199,9 +230,9 @@ def _landmark_centres(contour, radial_breaks: np.ndarray) -> Dict[str, np.ndarra
             if np.asarray(value).shape == (2,):
                 centres[name] = np.asarray(value, dtype=np.float64)
                 continue
-        if name == "lower_transition_start":
+        if name == "lower_transition":
             centres[name] = np.array([0.0, float(radial_breaks[1])], dtype=np.float64)
-        elif name == "upper_transition_start":
+        elif name == "upper_transition":
             centres[name] = np.array([0.0, float(radial_breaks[3])], dtype=np.float64)
     return centres
 
@@ -493,6 +524,44 @@ def _coverage_status(range_ratio: float, clipped_fraction: float, std_value: flo
     return "PASS"
 
 
+def _sampling_control_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    controls_summary: Dict[str, Dict[str, Any]] = {}
+    for control in CGROOVE_SAMPLING_CONTROLS:
+        values = np.array(
+            [
+                (r.get("cgroove_controls_requested") or {}).get(control, np.nan)
+                for r in results
+            ],
+            dtype=np.float64,
+        )
+        values = values[np.isfinite(values)]
+        if values.size == 0:
+            controls_summary[control] = {"status": "FAIL", "reason": "missing_control_values"}
+            continue
+        lo = float(MIN_CGROOVE_CONTROL[control])
+        hi = float(MAX_CGROOVE_CONTROL[control])
+        configured_range = max(hi - lo, 1e-12)
+        sampled_range = float(np.max(values) - np.min(values))
+        range_ratio = float(sampled_range / configured_range)
+        status = _coverage_status(range_ratio, clipped_fraction=0.0, std_value=float(np.std(values)))
+        controls_summary[control] = {
+            "configured_min": lo,
+            "configured_max": hi,
+            "sampled_min": float(np.min(values)),
+            "sampled_max": float(np.max(values)),
+            "sampled_mean": float(np.mean(values)),
+            "sampled_std": float(np.std(values)),
+            "sampled_unique_value_count": int(np.unique(np.round(values, 12)).size),
+            "sampled_range_over_configured_range": range_ratio,
+            "status": status,
+        }
+    return {
+        "controls": controls_summary,
+        "all_controls_sampled": all(k in controls_summary for k in CGROOVE_SAMPLING_CONTROLS),
+        "all_controls_retain_meaningful_variation": all(v.get("status") != "FAIL" for v in controls_summary.values()),
+    }
+
+
 def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     param_summary: Dict[str, Dict[str, Any]] = {}
     reaches_geometry = True
@@ -554,17 +623,51 @@ def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "samples_at_active_upper_limit_pct": float(upper_bound_hits / max(len(results), 1)),
                 "status": status,
             }
+    cgroove_clip_rates = {
+        param: float(np.mean([param in r.get("sanitized_rim_parameters_changed", []) for r in results]))
+        for param in COUPLED_CGROOVE_PARAMETERS
+    }
+    discrepancy = {
+        param: {
+            "mean_abs_requested_to_final_mm": float(
+                np.mean([abs(float(r["actual_rim"][param]) - float(r["resolved_rim"][param])) for r in results])
+            ),
+            "max_abs_requested_to_final_mm": float(
+                np.max([abs(float(r["actual_rim"][param]) - float(r["resolved_rim"][param])) for r in results])
+            ),
+        }
+        for param in COUPLED_CGROOVE_PARAMETERS
+    }
     return {
         "parameters": param_summary,
         "all_declared_core_sampled": all(f"core:{k}" in param_summary for k in PUBLIC_GEOMETRY_PARAMETERS),
         "all_declared_rim_feature_sampled": all(f"rim_feature:{k}" in param_summary for k in RIM_FEATURE_PARAMETERS),
         "all_sampled_parameters_reach_geometry_generator": reaches_geometry,
         "all_sampled_parameters_retain_meaningful_variation": all(v["status"] != "FAIL" for v in param_summary.values()),
+        "cgroove_parameter_clipping_rate": cgroove_clip_rates,
+        "requested_to_final_discrepancy_mm": discrepancy,
     }
 
 
 def _save_lhs_plots(out_dir: Path, lhs_results: List[Dict[str, Any]]) -> None:
     plot_dir = _ensure_dir(out_dir / "lhs_plots")
+    fig_ctrl, axes_ctrl = plt.subplots(len(CGROOVE_SAMPLING_CONTROLS), 1, figsize=(7, max(2.2 * len(CGROOVE_SAMPLING_CONTROLS), 6)), sharex=False)
+    if len(CGROOVE_SAMPLING_CONTROLS) == 1:
+        axes_ctrl = [axes_ctrl]
+    for ax, control in zip(axes_ctrl, CGROOVE_SAMPLING_CONTROLS):
+        vals = np.array([(r.get("cgroove_controls_requested") or {}).get(control, np.nan) for r in lhs_results], dtype=np.float64)
+        vals = vals[np.isfinite(vals)]
+        if vals.size:
+            ax.axvline(MIN_CGROOVE_CONTROL[control], color="0.5", ls="--", lw=0.8)
+            ax.axvline(MAX_CGROOVE_CONTROL[control], color="0.5", ls="--", lw=0.8)
+            ax.scatter(vals, np.zeros_like(vals), c="tab:green", s=18)
+        ax.set_yticks([])
+        ax.set_title(control, fontsize=9, loc="left")
+        ax.grid(True, alpha=0.25)
+    fig_ctrl.tight_layout()
+    fig_ctrl.savefig(plot_dir / "cgroove_control_coverage_panels.png", dpi=180)
+    plt.close(fig_ctrl)
+
     for group_name, params in [("core", PUBLIC_GEOMETRY_PARAMETERS), ("rim_feature", RIM_FEATURE_PARAMETERS)]:
         for param in params:
             if group_name == "core":
@@ -618,6 +721,250 @@ def _save_lhs_plots(out_dir: Path, lhs_results: List[Dict[str, Any]]) -> None:
         plt.close(fig)
 
 
+def _actual_param_vector(case_result: Dict[str, Any], keys: List[str]) -> np.ndarray:
+    core = case_result.get("actual_core", {})
+    rim = case_result.get("actual_rim", {})
+    values = []
+    for key in keys:
+        if key in core:
+            values.append(float(core[key]))
+        else:
+            values.append(float(rim[key]))
+    return np.asarray(values, dtype=np.float64)
+
+
+def _compute_allowed_actual_half_ranges(lhs_results: List[Dict[str, Any]], keys: List[str]) -> Dict[str, float]:
+    allowed: Dict[str, float] = {}
+    for key in keys:
+        vals = np.array(
+            [
+                (r.get("actual_core", {}).get(key, r.get("actual_rim", {}).get(key)))
+                for r in lhs_results
+            ],
+            dtype=np.float64,
+        )
+        vals = vals[np.isfinite(vals)]
+        if vals.size == 0:
+            allowed[key] = 1.0
+            continue
+        span = float(np.max(vals) - np.min(vals))
+        if span <= 1e-12:
+            if key in NOMINAL_GEOMETRY_MM:
+                span = float(MAX_OFFSET_MM[key] - MIN_OFFSET_MM[key])
+            else:
+                span = float(MAX_RIM_FEATURE_OFFSET_MM[key] - MIN_RIM_FEATURE_OFFSET_MM[key])
+        allowed[key] = max(0.5 * span, 1e-9)
+    return allowed
+
+
+def _severity_from_actual(
+    case_result: Dict[str, Any],
+    keys: List[str],
+    allowed_half_ranges: Dict[str, float],
+) -> float:
+    deviations = []
+    for key in keys:
+        actual = float(case_result.get("actual_core", {}).get(key, case_result.get("actual_rim", {}).get(key)))
+        nominal = float(NOMINAL_GEOMETRY_MM.get(key, NOMINAL_RIM_FEATURE_MM.get(key)))
+        denom = max(float(allowed_half_ranges[key]), 1e-9)
+        deviations.append(((actual - nominal) / denom) ** 2)
+    return float(np.sqrt(np.mean(deviations))) if deviations else 0.0
+
+
+def _contour_log_life_profile(case_result: Dict[str, Any], n_samples: int = 500) -> tuple[np.ndarray, np.ndarray]:
+    contour = case_result["_contour"]
+    mesh = case_result["_mesh"]
+    life_raw = np.asarray(case_result["_life_raw"], dtype=np.float64)
+    points, _ = resample_contour_uniform_arc_length(
+        points=contour.points,
+        arc_length_mm=contour.arc_length_mm,
+        n_samples=n_samples,
+    )
+    tree = cKDTree(mesh.nodes)
+    _, idx = tree.query(points, k=1)
+    log_life = np.log10(np.maximum(life_raw[idx], 1e-300))
+    return points, log_life
+
+
+def _landmark_delta_table(sample: Dict[str, Any], nominal: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
+    out: Dict[str, Dict[str, float]] = {}
+    sample_metrics = sample.get("landmark_metrics", {})
+    nominal_metrics = nominal.get("landmark_metrics", {})
+    for landmark in LANDMARK_NEIGHBOURHOODS_MM:
+        s = sample_metrics.get(landmark, {})
+        n = nominal_metrics.get(landmark, {})
+        s_p90 = float(s.get("p90_stress_mpa", np.nan))
+        n_p90 = float(n.get("p90_stress_mpa", np.nan))
+        s_mlife = float(s.get("median_life_cycles", np.nan))
+        n_mlife = float(n.get("median_life_cycles", np.nan))
+        s_log = float(np.log10(max(s_mlife, 1e-300))) if np.isfinite(s_mlife) else np.nan
+        n_log = float(np.log10(max(n_mlife, 1e-300))) if np.isfinite(n_mlife) else np.nan
+        out[landmark] = {
+            "delta_p90_stress_mpa": float(s_p90 - n_p90) if np.isfinite(s_p90) and np.isfinite(n_p90) else np.nan,
+            "delta_median_loglife": float(s_log - n_log) if np.isfinite(s_log) and np.isfinite(n_log) else np.nan,
+        }
+    return out
+
+
+def _life_sensitivity_audit(
+    lhs_results_raw: List[Dict[str, Any]],
+    nominal_raw: Dict[str, Any],
+    out_dir: Path,
+    save_plots: bool,
+) -> Dict[str, Any]:
+    all_keys = list(PUBLIC_GEOMETRY_PARAMETERS) + list(RIM_FEATURE_PARAMETERS)
+    cgroove_keys = [
+        "front_cgroove_axial_depth",
+        "front_cgroove_radial_pos",
+        "front_cgroove_radial_span",
+        "front_cgroove_entry_radius",
+        "front_cgroove_floor_radius",
+        "front_cgroove_exit_radius",
+    ]
+    rear_arm_keys = [
+        "rear_arm_axial_projection",
+        "rear_arm_radial_height",
+        "rear_arm_neck_thickness",
+        "rear_arm_root_radius",
+        "rear_arm_outer_corner_radius",
+    ]
+    allowed_half = _compute_allowed_actual_half_ranges(lhs_results_raw, all_keys)
+    nominal_points, nominal_loglife_contour = _contour_log_life_profile(nominal_raw)
+    rows: List[Dict[str, Any]] = []
+    landmark_names = list(LANDMARK_NEIGHBOURHOODS_MM.keys())
+
+    for sample in lhs_results_raw:
+        row: Dict[str, Any] = {
+            "sample_id": sample.get("sample_id"),
+            "case_id": sample.get("case_id"),
+            "status": sample.get("status"),
+            "severity_total": _severity_from_actual(sample, all_keys, allowed_half),
+            "severity_core": _severity_from_actual(sample, list(PUBLIC_GEOMETRY_PARAMETERS), allowed_half),
+            "severity_cgroove": _severity_from_actual(sample, cgroove_keys, allowed_half),
+            "severity_rear_arm": _severity_from_actual(sample, rear_arm_keys, allowed_half),
+        }
+        if sample.get("status") != "PASS":
+            rows.append(row)
+            continue
+
+        sample_points, sample_loglife_contour = _contour_log_life_profile(sample, n_samples=len(nominal_points))
+        delta_contour = sample_loglife_contour - nominal_loglife_contour
+        min_idx = int(np.argmin(delta_contour))
+        controlling_landmark, _ = _nearest_landmark(sample_points[min_idx], sample["_contour"])
+
+        stress_peak_sample = float(sample.get("stress_stats", {}).get("global_peak_stress_mpa", np.nan))
+        stress_peak_nom = float(nominal_raw.get("stress_stats", {}).get("global_peak_stress_mpa", np.nan))
+        sample_life = np.asarray(sample["_life_raw"], dtype=np.float64)
+        nominal_life = np.asarray(nominal_raw["_life_raw"], dtype=np.float64)
+        row.update(
+            {
+                "global_min_loglife": float(np.min(np.log10(np.maximum(sample_life, 1e-300)))),
+                "median_loglife": float(np.median(np.log10(np.maximum(sample_life, 1e-300)))),
+                "delta_loglife_min": float(np.min(delta_contour)),
+                "delta_loglife_median": float(np.median(delta_contour)),
+                "delta_loglife_p05": float(np.percentile(delta_contour, 5)),
+                "delta_loglife_p95": float(np.percentile(delta_contour, 95)),
+                "delta_loglife_max_abs": float(np.max(np.abs(delta_contour))),
+                "controlling_feature_or_landmark": controlling_landmark,
+                "delta_global_peak_stress_mpa": float(stress_peak_sample - stress_peak_nom),
+                "delta_global_min_loglife_vs_nominal": float(
+                    np.min(np.log10(np.maximum(sample_life, 1e-300))) - np.min(np.log10(np.maximum(nominal_life, 1e-300)))
+                ),
+            }
+        )
+        landmark_deltas = _landmark_delta_table(sample, nominal_raw)
+        for landmark, metrics in landmark_deltas.items():
+            row[f"delta_p90_stress__{landmark}"] = metrics["delta_p90_stress_mpa"]
+            row[f"delta_median_loglife__{landmark}"] = metrics["delta_median_loglife"]
+        rows.append(row)
+
+    _write_csv(out_dir / "lhs_geometry_to_life_sensitivity.csv", rows)
+
+    finite_rows = [r for r in rows if np.isfinite(r.get("delta_loglife_min", np.nan))]
+    corr_rows = []
+    if finite_rows:
+        y = np.array([r["delta_loglife_min"] for r in finite_rows], dtype=np.float64)
+        for key in all_keys:
+            x = np.array(
+                [float(rf.get("actual_core", {}).get(key, rf.get("actual_rim", {}).get(key))) for rf in lhs_results_raw if rf.get("status") == "PASS"],
+                dtype=np.float64,
+            )
+            if x.size != y.size or np.std(x) <= 1e-12:
+                continue
+            corr, pval = spearmanr(x, y)
+            corr_rows.append({"parameter": key, "spearman_rho_vs_delta_loglife_min": float(corr), "p_value": float(pval)})
+        corr_rows = sorted(corr_rows, key=lambda d: abs(d["spearman_rho_vs_delta_loglife_min"]), reverse=True)
+
+    summary = {
+        "num_samples": len(rows),
+        "num_valid_samples": len(finite_rows),
+        "delta_loglife_min_distribution": {
+            "min": float(np.min([r["delta_loglife_min"] for r in finite_rows])) if finite_rows else np.nan,
+            "p05": float(np.percentile([r["delta_loglife_min"] for r in finite_rows], 5)) if finite_rows else np.nan,
+            "median": float(np.median([r["delta_loglife_min"] for r in finite_rows])) if finite_rows else np.nan,
+            "p95": float(np.percentile([r["delta_loglife_min"] for r in finite_rows], 95)) if finite_rows else np.nan,
+        },
+        "sensitivity_correlation_ranked": corr_rows,
+        "allowed_actual_half_ranges_mm": allowed_half,
+        "landmarks_reported": landmark_names,
+    }
+    _write_json(out_dir / "lhs_geometry_to_life_sensitivity_summary.json", summary)
+
+    if save_plots and finite_rows:
+        plot_dir = _ensure_dir(out_dir / "lhs_life_sensitivity_plots")
+        sev = np.array([r["severity_total"] for r in finite_rows], dtype=np.float64)
+        peak = np.array([r["delta_global_peak_stress_mpa"] for r in finite_rows], dtype=np.float64)
+        gmin = np.array([r["global_min_loglife"] for r in finite_rows], dtype=np.float64)
+        dmin = np.array([r["delta_loglife_min"] for r in finite_rows], dtype=np.float64)
+
+        def _scatter(x: np.ndarray, y: np.ndarray, xlabel: str, ylabel: str, name: str) -> None:
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.scatter(x, y, c="tab:blue", s=24)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            ax.grid(True, alpha=0.25)
+            fig.tight_layout()
+            fig.savefig(plot_dir / name, dpi=180)
+            plt.close(fig)
+
+        _scatter(sev, peak, "normalized severity (total)", "delta global peak stress [MPa]", "severity_vs_peak_stress.png")
+        _scatter(sev, gmin, "normalized severity (total)", "global min log10 life", "severity_vs_global_min_loglife.png")
+        _scatter(sev, dmin, "normalized severity (total)", "min delta log10 life", "severity_vs_min_delta_loglife.png")
+
+        for landmark in landmark_names:
+            y_lm = np.array([r.get(f"delta_median_loglife__{landmark}", np.nan) for r in finite_rows], dtype=np.float64)
+            mask = np.isfinite(y_lm)
+            if np.any(mask):
+                _scatter(sev[mask], y_lm[mask], "normalized severity (total)", f"delta median loglife @ {landmark}", f"severity_vs_delta_loglife_{landmark}.png")
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.hist(dmin, bins=16, color="tab:purple", alpha=0.85)
+        ax.set_xlabel("min delta log10 life vs nominal")
+        ax.set_ylabel("count")
+        ax.grid(True, alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(plot_dir / "hist_min_delta_loglife.png", dpi=180)
+        plt.close(fig)
+
+        heat = np.full((len(finite_rows), len(landmark_names)), np.nan, dtype=np.float64)
+        for i, r in enumerate(finite_rows):
+            for j, landmark in enumerate(landmark_names):
+                heat[i, j] = float(r.get(f"delta_median_loglife__{landmark}", np.nan))
+        fig, ax = plt.subplots(figsize=(max(8, 0.8 * len(landmark_names)), max(4, 0.25 * len(finite_rows))))
+        im = ax.imshow(heat, aspect="auto", cmap="coolwarm")
+        ax.set_yticks(np.arange(len(finite_rows)))
+        ax.set_yticklabels([int(r.get("sample_id", i)) for i, r in enumerate(finite_rows)], fontsize=6)
+        ax.set_xticks(np.arange(len(landmark_names)))
+        ax.set_xticklabels(landmark_names, rotation=45, ha="right", fontsize=7)
+        ax.set_xlabel("landmark")
+        ax.set_ylabel("sample id")
+        fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02, label="delta median log10 life")
+        fig.tight_layout()
+        fig.savefig(plot_dir / "heatmap_delta_loglife_landmarks.png", dpi=180)
+        plt.close(fig)
+    return summary
+
+
 def _build_case_specs(case: str, num_samples: int, seed: int) -> Tuple[List[Dict[str, Any]], bool]:
     specs: List[Dict[str, Any]] = []
     includes_lhs = False
@@ -628,6 +975,7 @@ def _build_case_specs(case: str, num_samples: int, seed: int) -> Tuple[List[Dict
             "case_id": "nominal",
             "core_offsets": {k: 0.0 for k in PUBLIC_GEOMETRY_PARAMETERS},
             "rim_offsets": {k: 0.0 for k in RIM_FEATURE_PARAMETERS},
+            "cgroove_controls": None,
             "seed": seed,
         })
     if case in {"extrema", "all"}:
@@ -642,6 +990,7 @@ def _build_case_specs(case: str, num_samples: int, seed: int) -> Tuple[List[Dict
                     "case_id": f"extrema_core_{param}_{side}",
                     "core_offsets": core,
                     "rim_offsets": rim,
+                    "cgroove_controls": None,
                     "seed": seed,
                 })
         for param in RIM_FEATURE_PARAMETERS:
@@ -655,6 +1004,7 @@ def _build_case_specs(case: str, num_samples: int, seed: int) -> Tuple[List[Dict
                     "case_id": f"extrema_rim_{param}_{side}",
                     "core_offsets": core,
                     "rim_offsets": rim,
+                    "cgroove_controls": None,
                     "seed": seed,
                 })
         coupled = {
@@ -682,13 +1032,14 @@ def _build_case_specs(case: str, num_samples: int, seed: int) -> Tuple[List[Dict
                 "case_id": f"extrema_{name}",
                 "core_offsets": {k: 0.0 for k in PUBLIC_GEOMETRY_PARAMETERS},
                 "rim_offsets": {k: rim.get(k, 0.0) for k in RIM_FEATURE_PARAMETERS},
+                "cgroove_controls": None,
                 "seed": seed,
             })
     if case in {"lhs", "all"}:
         includes_lhs = True
         core_offsets = sample_offsets_lhs(num_samples, MIN_OFFSET_MM, MAX_OFFSET_MM, seed)
-        rim_offsets = sample_rim_feature_offsets_lhs(num_samples, MIN_RIM_FEATURE_OFFSET_MM, MAX_RIM_FEATURE_OFFSET_MM, seed)
-        for i, (core, rim) in enumerate(zip(core_offsets, rim_offsets)):
+        rim_design = sample_rim_feature_lhs_design(num_samples, MIN_RIM_FEATURE_OFFSET_MM, MAX_RIM_FEATURE_OFFSET_MM, seed)
+        for i, (core, rim_item) in enumerate(zip(core_offsets, rim_design)):
             sample_seed = int((int(seed) * 1_000_003 + i * 7_919 + 97) % (2**31 - 1))
             specs.append({
                 "group": "lhs",
@@ -696,7 +1047,8 @@ def _build_case_specs(case: str, num_samples: int, seed: int) -> Tuple[List[Dict
                 "case_id": f"lhs_{i:03d}",
                 "sample_id": i,
                 "core_offsets": core,
-                "rim_offsets": rim,
+                "rim_offsets": rim_item["rim_feature_offsets"],
+                "cgroove_controls": rim_item["cgroove_controls_requested"],
                 "seed": sample_seed,
             })
     return specs, includes_lhs
@@ -785,23 +1137,29 @@ def validate_geometry_case(spec: Dict[str, Any], mesh_name: str, out_dir: Path, 
         "group": spec["group"],
         "case_name": spec["case_name"],
         "case_id": spec["case_id"],
+        "sample_id": spec.get("sample_id"),
         "mesh": mesh_name,
         "seed": int(spec["seed"]),
         "requested_core_offsets": clip_offsets_to_bounds(spec["core_offsets"]),
         "requested_rim_offsets": clip_rim_feature_offsets_to_bounds(spec["rim_offsets"]),
+        "requested_cgroove_controls": clip_cgroove_controls_to_bounds(spec["cgroove_controls"]) if spec.get("cgroove_controls") is not None else None,
     }
     geometry_ok = mesh_ok = fem_ok = False
     reason_codes: List[str] = []
     try:
-        built = _build_geometry(spec["core_offsets"], spec["rim_offsets"])
+        built = _build_geometry(spec["core_offsets"], spec["rim_offsets"], spec.get("cgroove_controls"))
         geometry_ok = True
         contour = built["contour"]
         radial_breaks = built["radial_breaks"]
         result.update({
+            "requested_core_offsets": built["requested_core_offsets"],
+            "requested_rim_offsets": built["requested_rim_offsets"],
             "resolved_core": built["resolved_core"],
             "resolved_rim": built["resolved_rim"],
             "actual_core": built["actual_core"],
             "actual_rim": built["actual_rim"],
+            "cgroove_controls_requested": built["cgroove_controls_requested"],
+            "cgroove_mapping_metadata": built["cgroove_mapping_metadata"],
             "sanitized_core_parameters_changed": [
                 k for k in PUBLIC_GEOMETRY_PARAMETERS
                 if abs(float(built["actual_core"][k]) - float(built["resolved_core"][k])) > 1e-9
@@ -933,6 +1291,9 @@ def validate_geometry_case(spec: Dict[str, Any], mesh_name: str, out_dir: Path, 
             face_plot = plot_dir / f"{spec['case_id']}_selected_load_face.png"
             _plot_selected_facets(spec["case_name"], contour, mesh, load_diag, face_plot)
             result["selected_load_face_plot"] = str(face_plot)
+        result["_stress_max"] = stress_max
+        result["_life_raw"] = life_raw
+        result["_phase_stress"] = phase_stress
         result["_contour"] = contour
         result["_mesh"] = mesh
     except Exception as exc:  # noqa: BLE001
@@ -953,12 +1314,15 @@ def run_validation(case: str, output_dir: Path, mesh_name: str, save_plots: bool
     result_dir = _ensure_dir(out_dir / "results")
     specs, includes_lhs = _build_case_specs(case, num_samples, seed)
     case_results: List[Dict[str, Any]] = []
+    case_results_raw: List[Dict[str, Any]] = []
     csv_rows: List[Dict[str, Any]] = []
     lhs_rows_requested: List[Dict[str, Any]] = []
     lhs_rows_actual: List[Dict[str, Any]] = []
+    lhs_rows_controls: List[Dict[str, Any]] = []
 
     for spec in specs:
         res = validate_geometry_case(spec, mesh_name, out_dir, save_plots)
+        case_results_raw.append(res)
         clean = {k: v for k, v in res.items() if not k.startswith("_")}
         _write_json(result_dir / f"{spec['case_id']}.json", clean)
         case_results.append(clean)
@@ -981,6 +1345,11 @@ def run_validation(case: str, output_dir: Path, mesh_name: str, save_plots: bool
             "status_reasons": ";".join(clean.get("status_reasons", [])),
         })
         if clean["group"] == "lhs":
+            lhs_rows_controls.append({
+                "sample_id": spec.get("sample_id"),
+                "seed": clean["seed"],
+                **{f"requested_control__{k}": (clean.get("cgroove_controls_requested") or {}).get(k) for k in CGROOVE_SAMPLING_CONTROLS},
+            })
             lhs_rows_requested.append({
                 "sample_id": spec.get("sample_id"),
                 "seed": clean["seed"],
@@ -1019,9 +1388,26 @@ def run_validation(case: str, output_dir: Path, mesh_name: str, save_plots: bool
     _write_json(out_dir / "summary.json", summary)
     if includes_lhs:
         lhs_results = [r for r in case_results if r["group"] == "lhs"]
+        lhs_results_raw = [r for r in case_results_raw if r["group"] == "lhs"]
+        nominal_spec = {
+            "group": "nominal_reference",
+            "case_name": "nominal_reference",
+            "case_id": "nominal_reference",
+            "sample_id": None,
+            "core_offsets": {k: 0.0 for k in PUBLIC_GEOMETRY_PARAMETERS},
+            "rim_offsets": {k: 0.0 for k in RIM_FEATURE_PARAMETERS},
+            "cgroove_controls": None,
+            "seed": int(seed),
+        }
+        nominal_raw = validate_geometry_case(nominal_spec, mesh_name, out_dir, save_plots=False)
+        _write_csv(out_dir / "lhs_coverage_controls.csv", lhs_rows_controls)
         _write_csv(out_dir / "lhs_coverage_requested.csv", lhs_rows_requested)
         _write_csv(out_dir / "lhs_coverage_actual.csv", lhs_rows_actual)
-        coverage = _parameter_coverage(lhs_results)
+        coverage = {
+            "sampling_control_coverage": _sampling_control_coverage(lhs_results),
+            "actual_geometry_parameter_coverage": _parameter_coverage(lhs_results),
+            "life_sensitivity_audit": _life_sensitivity_audit(lhs_results_raw, nominal_raw, out_dir, save_plots),
+        }
         _write_json(out_dir / "lhs_sanitization_summary.json", coverage)
         if save_plots and lhs_results:
             _save_lhs_plots(out_dir, lhs_results)

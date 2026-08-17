@@ -9,14 +9,17 @@ import h5py
 import numpy as np
 
 from .config import (
+    CGROOVE_SAMPLING_CONTROLS,
     BLADE_EQUIV_CG_RADIUS_MM,
     BLADE_EQUIV_MASS_KG,
     BLADE_EQUIV_NUM_BLADES,
     CYCLE_PHASES,
     CYCLE_PHASE_WEIGHTS,
     CYCLE_SPEED_FACTORS,
+    MAX_CGROOVE_CONTROL,
     MAX_OFFSET_MM,
     MAX_RIM_FEATURE_OFFSET_MM,
+    MIN_CGROOVE_CONTROL,
     MIN_OFFSET_MM,
     MIN_RIM_FEATURE_OFFSET_MM,
     NOMINAL_GEOMETRY_MM,
@@ -63,6 +66,13 @@ def create_dataset_file(
     h5f.create_dataset("nominal_rim_feature_table", data=_as_key_value_table(NOMINAL_RIM_FEATURE_MM))
     h5f.create_dataset("min_rim_feature_offset_table", data=_as_key_value_table(MIN_RIM_FEATURE_OFFSET_MM))
     h5f.create_dataset("max_rim_feature_offset_table", data=_as_key_value_table(MAX_RIM_FEATURE_OFFSET_MM))
+    h5f.create_dataset("cgroove_sampling_control_names", data=np.array(CGROOVE_SAMPLING_CONTROLS, dtype="S64"))
+    h5f.create_dataset("min_cgroove_control_table", data=_as_key_value_table(MIN_CGROOVE_CONTROL))
+    h5f.create_dataset("max_cgroove_control_table", data=_as_key_value_table(MAX_CGROOVE_CONTROL))
+    h5f.attrs["cgroove_control_mapping"] = (
+        "controls->mm mapping uses sanitizer inequalities with conservative clearance; "
+        "saved per-sample as cgroove_control_mapping_metadata"
+    )
 
     h5f.create_dataset(
         "zone_name_to_id_mapping",
@@ -118,6 +128,18 @@ def write_sample_group(h5f: h5py.File, sample_id: int, sample_seed: int, sample:
         rf_actual = sg.create_group("rim_feature_parameters_actual")
         for key, value in sample["rim_feature_parameters_actual"].items():
             rf_actual.attrs[key] = float(value)
+    if "rim_feature_parameters_resolved_pre_sanitization" in sample:
+        rf_resolved = sg.create_group("rim_feature_parameters_resolved_pre_sanitization")
+        for key, value in sample["rim_feature_parameters_resolved_pre_sanitization"].items():
+            rf_resolved.attrs[key] = float(value)
+    if "cgroove_sampling_controls_requested" in sample:
+        rf_ctrl = sg.create_group("cgroove_sampling_controls_requested")
+        for key, value in sample["cgroove_sampling_controls_requested"].items():
+            rf_ctrl.attrs[key] = float(value)
+    if "cgroove_control_mapping_metadata" in sample:
+        rf_ctrl_meta = sg.create_group("cgroove_control_mapping_metadata")
+        for key, value in sample["cgroove_control_mapping_metadata"].items():
+            rf_ctrl_meta.attrs[key] = float(value)
 
     # Blade-equivalent load metadata (v5.0 addition).
     if "blade_equiv_force_N" in sample:
