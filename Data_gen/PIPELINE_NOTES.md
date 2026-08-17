@@ -41,6 +41,7 @@ dataset_generator.py → generate_dataset() (LHS or explicit offsets, batch)
 | `mesh_feature_diagnostics.py` | Feature-neighbourhood mesh + stress diagnostics |
 | `compare_mesh_feature_diagnostics.py` | Medium vs fine mesh convergence comparison |
 | `analyze_locality_probe.py` | Local feature-neighbourhood stress/life report |
+| `limited_adequacy_review.py` | Targeted mesh/S-N/deviation adequacy review for nominal + severe valid LHS |
 | `validate_rim_load_and_physics.py` | Rim-load placement, closure, phase-scaling, decomposition, validity, and LHS-sanitization audit |
 
 ---
@@ -119,6 +120,7 @@ The previous smooth flange/collar geometry has been replaced with:
 - `mesh_feature_diagnostics.py` *(new)*: Feature-neighbourhood diagnostics.
 - `compare_mesh_feature_diagnostics.py` *(new)*: Medium vs fine convergence.
 - `analyze_locality_probe.py` *(new)*: Local feature stress/life probe.
+- `limited_adequacy_review.py` *(new)*: targeted nominal/severe medium-vs-fine mesh, S-N adequacy, and deviation-realism checks.
 
 ---
 
@@ -150,6 +152,11 @@ All lengths in millimetres (mm). Nominal values defined in `NOMINAL_RIM_FEATURE_
 | `cgroove_exit_radius_fraction` | [0.10, 0.90] | `front_cgroove_exit_radius` |
 
 Mapping uses the same inequalities enforced by `sanitize_rim_feature_parameters()` and applies conservative clearance margins so controls do not fill geometric limits by default.
+
+Coupled-mapping implementation notes:
+- Control-to-mm bounds are derived from the configured physical parameter ranges (`NOMINAL_RIM_FEATURE_MM` + min/max offsets), then intersected with geometry-fit limits.
+- The floor-radius mapping now enforces a span lower target based on the configured floor-radius minimum (`span >= floor_min / 0.225`) before sampling, preventing collapse of `front_cgroove_floor_radius` to a clipped constant.
+- Per-sample mapping metadata records the effective sampled mm bounds (`*_sampling_min_mm`, `*_sampling_max_mm`) and floor-fit terms used for audit.
 
 #### Rear drive-arm parameters
 
