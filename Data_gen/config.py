@@ -535,6 +535,26 @@ def map_cgroove_controls_to_parameters(
         "front_cgroove_floor_radius": float(rf_floor),
         "front_cgroove_exit_radius": float(rf_exit),
     }
+    for key in COUPLED_CGROOVE_PARAMETERS:
+        lo = float(NOMINAL_RIM_FEATURE_MM[key] + MIN_RIM_FEATURE_OFFSET_MM[key])
+        hi = float(NOMINAL_RIM_FEATURE_MM[key] + MAX_RIM_FEATURE_OFFSET_MM[key])
+        params[key] = float(np.clip(params[key], lo, hi))
+
+    required_h_after_clip = (
+        params["front_cgroove_radial_pos"]
+        + params["front_cgroove_entry_radius"]
+        + params["front_cgroove_radial_span"]
+        + params["front_cgroove_exit_radius"]
+        + rf_root
+        + 0.3
+    )
+    if required_h_after_clip > h_arm - 0.05:
+        overflow = required_h_after_clip - (h_arm - 0.05)
+        params["front_cgroove_radial_span"] = max(
+            float(NOMINAL_RIM_FEATURE_MM["front_cgroove_radial_span"] + MIN_RIM_FEATURE_OFFSET_MM["front_cgroove_radial_span"]),
+            params["front_cgroove_radial_span"] - overflow,
+        )
+
     meta = {
         "effective_h_arm_mm": float(h_arm),
         "effective_neck_thickness_mm": float(neck_t),
