@@ -1,0 +1,52 @@
+{
+  "case_id": "lhs_014",
+  "case_name": "lhs_014",
+  "exception_message": "name 'pos_max_phys' is not defined",
+  "exception_type": "NameError",
+  "force_closure_valid": false,
+  "geometry_valid": false,
+  "group": "lhs",
+  "mesh": "medium",
+  "mesh_valid": false,
+  "requested_cgroove_controls": {
+    "cgroove_entry_radius_fraction": 0.7759593168167239,
+    "cgroove_exit_radius_fraction": 0.1554743007064424,
+    "cgroove_floor_radius_fraction": 0.1753177345690849,
+    "cgroove_radial_pos_control": 0.8638070036104438,
+    "cgroove_span_fraction": 0.4195652384327466
+  },
+  "requested_core_offsets": {
+    "bore_height": -0.2875449713353853,
+    "bore_radius_inner": 0.06222226690295879,
+    "bore_thickness": -0.4866536291842265,
+    "lower_fillet_radius": -0.09244962296597033,
+    "lower_transition_height": 0.2336275910451301,
+    "rim_height": 0.001352569646017432,
+    "rim_thickness": -0.39680337634316776,
+    "upper_fillet_radius": -0.026415116101267455,
+    "upper_transition_height": -0.24340653111960545,
+    "web_height": -0.10086988205312442,
+    "web_thickness": -0.22481126488435632
+  },
+  "requested_rim_offsets": {
+    "front_cgroove_axial_depth": 0.6736850299375985,
+    "front_cgroove_entry_radius": 0.0,
+    "front_cgroove_exit_radius": 0.0,
+    "front_cgroove_floor_radius": 0.0,
+    "front_cgroove_radial_pos": 0.0,
+    "front_cgroove_radial_span": 0.0,
+    "rear_arm_axial_projection": 0.29147589465940227,
+    "rear_arm_neck_thickness": 0.2939722988938176,
+    "rear_arm_outer_corner_radius": 0.04917533020212028,
+    "rear_arm_radial_height": -0.4332253461670209,
+    "rear_arm_root_radius": 0.16293525243074924
+  },
+  "rim_load_selection_valid": false,
+  "sample_id": 14,
+  "seed": 7110984,
+  "status": "FAIL",
+  "status_reasons": [
+    "NameError",
+    "name 'pos_max_phys' is not defined"
+  ]
+}

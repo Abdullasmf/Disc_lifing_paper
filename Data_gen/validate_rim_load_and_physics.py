@@ -589,13 +589,47 @@ def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         ("rim_feature", RIM_FEATURE_PARAMETERS, NOMINAL_RIM_FEATURE_MM, MIN_RIM_FEATURE_OFFSET_MM, MAX_RIM_FEATURE_OFFSET_MM),
     ]:
         for param in params:
-            requested_offsets = np.array([r["requested_core_offsets" if group_name == "core" else "requested_rim_offsets"][param] for r in results], dtype=np.float64)
-            resolved_values = np.array([r["resolved_core" if group_name == "core" else "resolved_rim"][param] for r in results], dtype=np.float64)
-            actual_values = np.array([r["actual_core" if group_name == "core" else "actual_rim"][param] for r in results], dtype=np.float64)
+            requested_offsets = np.array(
+                [
+                    (r.get("requested_core_offsets", {}) if group_name == "core" else r.get("requested_rim_offsets", {})).get(param, np.nan)
+                    for r in results
+                ],
+                dtype=np.float64,
+            )
+            resolved_values = np.array(
+                [
+                    (r.get("resolved_core", {}) if group_name == "core" else r.get("resolved_rim", {})).get(param, np.nan)
+                    for r in results
+                ],
+                dtype=np.float64,
+            )
+            actual_values = np.array(
+                [
+                    (r.get("actual_core", {}) if group_name == "core" else r.get("actual_rim", {})).get(param, np.nan)
+                    for r in results
+                ],
+                dtype=np.float64,
+            )
+            valid_mask = np.isfinite(requested_offsets) & np.isfinite(resolved_values) & np.isfinite(actual_values)
+            if not np.any(valid_mask):
+                key = f"{group_name}:{param}"
+                param_summary[key] = {
+                    "group": group_name,
+                    "parameter": param,
+                    "status": "FAIL",
+                    "reason": "missing_values",
+                }
+                reaches_geometry = False
+                continue
+            requested_offsets = requested_offsets[valid_mask]
+            resolved_values = resolved_values[valid_mask]
+            actual_values = actual_values[valid_mask]
+            valid_indices = [i for i, ok in enumerate(valid_mask.tolist()) if ok]
             lower_bound_hits = 0
             upper_bound_hits = 0
             changed = np.abs(actual_values - resolved_values) > 1e-9
-            for idx, r in enumerate(results):
+            valid_results = [results[i] for i in valid_indices]
+            for idx, r in enumerate(valid_results):
                 if group_name == "core":
                     lower, upper = _core_bounds(r["resolved_core"])
                 else:
@@ -613,14 +647,14 @@ def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             range_ratio = float(actual_range / intended_range)
             clipped_fraction = float(np.mean(changed))
             unique_count = int(np.unique(np.round(actual_values, 12)).size)
-            lower_hit_fraction = float(lower_bound_hits / max(len(results), 1))
-            upper_hit_fraction = float(upper_bound_hits / max(len(results), 1))
+            lower_hit_fraction = float(lower_bound_hits / max(len(valid_results), 1))
+            upper_hit_fraction = float(upper_bound_hits / max(len(valid_results), 1))
             status = _coverage_status(
                 range_ratio,
                 clipped_fraction,
                 float(np.std(actual_values)),
                 unique_count=unique_count,
-                sample_count=len(results),
+                sample_count=len(valid_results),
                 lower_bound_hit_fraction=lower_hit_fraction,
                 upper_bound_hit_fraction=upper_hit_fraction,
             )
