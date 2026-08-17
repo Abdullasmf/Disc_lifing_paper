@@ -47,7 +47,7 @@ from Data_gen.config import (
     resolve_rim_feature_parameters,
 )
 from Data_gen.dataset_generator import sample_offsets_lhs, sample_rim_feature_lhs_design
-from Data_gen.features import resample_contour_uniform_arc_length
+from Data_gen.features import contour_derivative_features, resample_contour_uniform_arc_length
 from Data_gen.geometry import (
     build_disc_contour,
     sanitize_geometry_parameters,
@@ -515,11 +515,24 @@ def _rim_bounds(resolved: Dict[str, float], actual_core: Dict[str, float]) -> Tu
     return lower, upper
 
 
-def _coverage_status(range_ratio: float, clipped_fraction: float, std_value: float) -> str:
+def _coverage_status(
+    range_ratio: float,
+    clipped_fraction: float,
+    std_value: float,
+    unique_count: int,
+    sample_count: int,
+    lower_bound_hit_fraction: float = 0.0,
+    upper_bound_hit_fraction: float = 0.0,
+) -> str:
     meaningful_spread = std_value > 1e-9
-    if (range_ratio < 0.40) or (clipped_fraction > 0.30) or (not meaningful_spread):
+    min_unique = max(4, min(20, int(math.ceil(0.40 * max(sample_count, 1)))))
+    excessive_bound_hugging = max(lower_bound_hit_fraction, upper_bound_hit_fraction) >= 0.60
+    collapsed = (range_ratio < 0.05) or (unique_count < min_unique) or (not meaningful_spread)
+    if collapsed or excessive_bound_hugging:
         return "FAIL"
-    if (range_ratio < 0.70) or (clipped_fraction >= 0.10):
+    if (range_ratio < 0.40) or (clipped_fraction > 0.30):
+        return "FAIL"
+    if (range_ratio < 0.70) or (clipped_fraction >= 0.10) or (max(lower_bound_hit_fraction, upper_bound_hit_fraction) >= 0.30):
         return "WARNING"
     return "PASS"
 
@@ -543,7 +556,13 @@ def _sampling_control_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         configured_range = max(hi - lo, 1e-12)
         sampled_range = float(np.max(values) - np.min(values))
         range_ratio = float(sampled_range / configured_range)
-        status = _coverage_status(range_ratio, clipped_fraction=0.0, std_value=float(np.std(values)))
+        status = _coverage_status(
+            range_ratio,
+            clipped_fraction=0.0,
+            std_value=float(np.std(values)),
+            unique_count=int(np.unique(np.round(values, 12)).size),
+            sample_count=int(values.size),
+        )
         controls_summary[control] = {
             "configured_min": lo,
             "configured_max": hi,
@@ -570,13 +589,47 @@ def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         ("rim_feature", RIM_FEATURE_PARAMETERS, NOMINAL_RIM_FEATURE_MM, MIN_RIM_FEATURE_OFFSET_MM, MAX_RIM_FEATURE_OFFSET_MM),
     ]:
         for param in params:
-            requested_offsets = np.array([r["requested_core_offsets" if group_name == "core" else "requested_rim_offsets"][param] for r in results], dtype=np.float64)
-            resolved_values = np.array([r["resolved_core" if group_name == "core" else "resolved_rim"][param] for r in results], dtype=np.float64)
-            actual_values = np.array([r["actual_core" if group_name == "core" else "actual_rim"][param] for r in results], dtype=np.float64)
+            requested_offsets = np.array(
+                [
+                    (r.get("requested_core_offsets", {}) if group_name == "core" else r.get("requested_rim_offsets", {})).get(param, np.nan)
+                    for r in results
+                ],
+                dtype=np.float64,
+            )
+            resolved_values = np.array(
+                [
+                    (r.get("resolved_core", {}) if group_name == "core" else r.get("resolved_rim", {})).get(param, np.nan)
+                    for r in results
+                ],
+                dtype=np.float64,
+            )
+            actual_values = np.array(
+                [
+                    (r.get("actual_core", {}) if group_name == "core" else r.get("actual_rim", {})).get(param, np.nan)
+                    for r in results
+                ],
+                dtype=np.float64,
+            )
+            valid_mask = np.isfinite(requested_offsets) & np.isfinite(resolved_values) & np.isfinite(actual_values)
+            if not np.any(valid_mask):
+                key = f"{group_name}:{param}"
+                param_summary[key] = {
+                    "group": group_name,
+                    "parameter": param,
+                    "status": "FAIL",
+                    "reason": "missing_values",
+                }
+                reaches_geometry = False
+                continue
+            requested_offsets = requested_offsets[valid_mask]
+            resolved_values = resolved_values[valid_mask]
+            actual_values = actual_values[valid_mask]
+            valid_indices = [i for i, ok in enumerate(valid_mask.tolist()) if ok]
             lower_bound_hits = 0
             upper_bound_hits = 0
             changed = np.abs(actual_values - resolved_values) > 1e-9
-            for idx, r in enumerate(results):
+            valid_results = [results[i] for i in valid_indices]
+            for idx, r in enumerate(valid_results):
                 if group_name == "core":
                     lower, upper = _core_bounds(r["resolved_core"])
                 else:
@@ -593,7 +646,18 @@ def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             actual_range = float(np.max(actual_values) - np.min(actual_values))
             range_ratio = float(actual_range / intended_range)
             clipped_fraction = float(np.mean(changed))
-            status = _coverage_status(range_ratio, clipped_fraction, float(np.std(actual_values)))
+            unique_count = int(np.unique(np.round(actual_values, 12)).size)
+            lower_hit_fraction = float(lower_bound_hits / max(len(valid_results), 1))
+            upper_hit_fraction = float(upper_bound_hits / max(len(valid_results), 1))
+            status = _coverage_status(
+                range_ratio,
+                clipped_fraction,
+                float(np.std(actual_values)),
+                unique_count=unique_count,
+                sample_count=len(valid_results),
+                lower_bound_hit_fraction=lower_hit_fraction,
+                upper_bound_hit_fraction=upper_hit_fraction,
+            )
             if float(np.max(resolved_values) - np.min(resolved_values)) <= 1e-12:
                 reaches_geometry = False
             key = f"{group_name}:{param}"
@@ -613,31 +677,31 @@ def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "actual_final_max": float(np.max(actual_values)),
                 "actual_final_mean": float(np.mean(actual_values)),
                 "actual_final_std": float(np.std(actual_values)),
-                "actual_unique_value_count": int(np.unique(np.round(actual_values, 12)).size),
+                "actual_unique_value_count": unique_count,
                 "fraction_changed_by_sanitizer": clipped_fraction,
                 "max_abs_requested_to_actual_change": float(np.max(np.abs(actual_values - resolved_values))),
                 "actual_range_over_intended_range": range_ratio,
                 "samples_at_active_lower_limit": int(lower_bound_hits),
                 "samples_at_active_upper_limit": int(upper_bound_hits),
-                "samples_at_active_lower_limit_pct": float(lower_bound_hits / max(len(results), 1)),
-                "samples_at_active_upper_limit_pct": float(upper_bound_hits / max(len(results), 1)),
+                "samples_at_active_lower_limit_pct": lower_hit_fraction,
+                "samples_at_active_upper_limit_pct": upper_hit_fraction,
                 "status": status,
             }
     cgroove_clip_rates = {
-        param: float(np.mean([param in r.get("sanitized_rim_parameters_changed", []) for r in results]))
+        param: float(np.mean([param in r.get("sanitized_rim_parameters_changed", []) for r in results if "actual_rim" in r and "resolved_rim" in r]))
         for param in COUPLED_CGROOVE_PARAMETERS
     }
-    discrepancy = {
-        param: {
-            "mean_abs_requested_to_final_mm": float(
-                np.mean([abs(float(r["actual_rim"][param]) - float(r["resolved_rim"][param])) for r in results])
-            ),
-            "max_abs_requested_to_final_mm": float(
-                np.max([abs(float(r["actual_rim"][param]) - float(r["resolved_rim"][param])) for r in results])
-            ),
+    discrepancy: Dict[str, Dict[str, float]] = {}
+    for param in COUPLED_CGROOVE_PARAMETERS:
+        vals = [
+            abs(float(r["actual_rim"][param]) - float(r["resolved_rim"][param]))
+            for r in results
+            if "actual_rim" in r and "resolved_rim" in r
+        ]
+        discrepancy[param] = {
+            "mean_abs_requested_to_final_mm": float(np.mean(vals)) if vals else float("nan"),
+            "max_abs_requested_to_final_mm": float(np.max(vals)) if vals else float("nan"),
         }
-        for param in COUPLED_CGROOVE_PARAMETERS
-    }
     return {
         "parameters": param_summary,
         "all_declared_core_sampled": all(f"core:{k}" in param_summary for k in PUBLIC_GEOMETRY_PARAMETERS),
@@ -671,11 +735,17 @@ def _save_lhs_plots(out_dir: Path, lhs_results: List[Dict[str, Any]]) -> None:
     for group_name, params in [("core", PUBLIC_GEOMETRY_PARAMETERS), ("rim_feature", RIM_FEATURE_PARAMETERS)]:
         for param in params:
             if group_name == "core":
-                x = np.array([r["resolved_core"][param] for r in lhs_results], dtype=np.float64)
-                y = np.array([r["actual_core"][param] for r in lhs_results], dtype=np.float64)
+                valid = [r for r in lhs_results if param in r.get("resolved_core", {}) and param in r.get("actual_core", {})]
+                if not valid:
+                    continue
+                x = np.array([r["resolved_core"][param] for r in valid], dtype=np.float64)
+                y = np.array([r["actual_core"][param] for r in valid], dtype=np.float64)
             else:
-                x = np.array([r["resolved_rim"][param] for r in lhs_results], dtype=np.float64)
-                y = np.array([r["actual_rim"][param] for r in lhs_results], dtype=np.float64)
+                valid = [r for r in lhs_results if param in r.get("resolved_rim", {}) and param in r.get("actual_rim", {})]
+                if not valid:
+                    continue
+                x = np.array([r["resolved_rim"][param] for r in valid], dtype=np.float64)
+                y = np.array([r["actual_rim"][param] for r in valid], dtype=np.float64)
             clipped = np.abs(y - x) > 1e-9
             fig, ax = plt.subplots(figsize=(5, 4))
             ax.scatter(x[~clipped], y[~clipped], c="tab:blue", s=20, label="unchanged")
@@ -699,13 +769,19 @@ def _save_lhs_plots(out_dir: Path, lhs_results: List[Dict[str, Any]]) -> None:
             axes = [axes]
         for ax, param in zip(axes, params):
             if group_name == "core":
-                requested = np.array([r["resolved_core"][param] for r in lhs_results], dtype=np.float64)
-                actual = np.array([r["actual_core"][param] for r in lhs_results], dtype=np.float64)
+                valid = [r for r in lhs_results if param in r.get("resolved_core", {}) and param in r.get("actual_core", {})]
+                if not valid:
+                    continue
+                requested = np.array([r["resolved_core"][param] for r in valid], dtype=np.float64)
+                actual = np.array([r["actual_core"][param] for r in valid], dtype=np.float64)
                 lo = NOMINAL_GEOMETRY_MM[param] + MIN_OFFSET_MM[param]
                 hi = NOMINAL_GEOMETRY_MM[param] + MAX_OFFSET_MM[param]
             else:
-                requested = np.array([r["resolved_rim"][param] for r in lhs_results], dtype=np.float64)
-                actual = np.array([r["actual_rim"][param] for r in lhs_results], dtype=np.float64)
+                valid = [r for r in lhs_results if param in r.get("resolved_rim", {}) and param in r.get("actual_rim", {})]
+                if not valid:
+                    continue
+                requested = np.array([r["resolved_rim"][param] for r in valid], dtype=np.float64)
+                actual = np.array([r["actual_rim"][param] for r in valid], dtype=np.float64)
                 lo = NOMINAL_RIM_FEATURE_MM[param] + MIN_RIM_FEATURE_OFFSET_MM[param]
                 hi = NOMINAL_RIM_FEATURE_MM[param] + MAX_RIM_FEATURE_OFFSET_MM[param]
             ax.axvline(lo, color="0.5", ls="--", lw=0.8)
@@ -771,19 +847,75 @@ def _severity_from_actual(
     return float(np.sqrt(np.mean(deviations))) if deviations else 0.0
 
 
-def _contour_log_life_profile(case_result: Dict[str, Any], n_samples: int = 500) -> tuple[np.ndarray, np.ndarray]:
+def _contour_log_life_profile(case_result: Dict[str, Any], n_samples: int = 500) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     contour = case_result["_contour"]
     mesh = case_result["_mesh"]
     life_raw = np.asarray(case_result["_life_raw"], dtype=np.float64)
+    stress_max = np.asarray(case_result["_stress_max"], dtype=np.float64)
     points, _ = resample_contour_uniform_arc_length(
         points=contour.points,
         arc_length_mm=contour.arc_length_mm,
         n_samples=n_samples,
     )
+    deriv = contour_derivative_features(points, np.linspace(0.0, float(contour.arc_length_mm[-1]), n_samples, endpoint=False))
     tree = cKDTree(mesh.nodes)
     _, idx = tree.query(points, k=1)
     log_life = np.log10(np.maximum(life_raw[idx], 1e-300))
-    return points, log_life
+    return points, log_life, stress_max[idx], deriv["curvature"], deriv["curvature_gradient"]
+
+
+def _local_mesh_metrics(mesh, node_index: int, centre: np.ndarray, radius_mm: float = 1.0) -> Dict[str, float]:
+    nodes = np.asarray(mesh.nodes, dtype=np.float64)
+    tri = np.asarray(mesh.triangles, dtype=int)
+    if tri.size == 0:
+        return {"local_mesh_size_mm": np.nan, "local_node_density_per_mm2": np.nan}
+    incident = np.where(np.any(tri == int(node_index), axis=1))[0]
+    edge_lengths: List[float] = []
+    for tid in incident:
+        tv = tri[tid]
+        p = nodes[tv]
+        edge_lengths.extend(
+            [
+                float(np.linalg.norm(p[0] - p[1])),
+                float(np.linalg.norm(p[1] - p[2])),
+                float(np.linalg.norm(p[2] - p[0])),
+            ]
+        )
+    tree = cKDTree(nodes)
+    idx = tree.query_ball_point(np.asarray(centre, dtype=np.float64), radius_mm)
+    area = math.pi * max(radius_mm, 1e-6) ** 2
+    return {
+        "local_mesh_size_mm": float(np.median(edge_lengths)) if edge_lengths else np.nan,
+        "local_node_density_per_mm2": float(len(idx) / area),
+    }
+
+
+def _landmark_delta_stats(sample: Dict[str, Any], nominal: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
+    out: Dict[str, Dict[str, float]] = {}
+    sample_mesh = sample["_mesh"]
+    nominal_mesh = nominal["_mesh"]
+    sample_tree = cKDTree(sample_mesh.nodes)
+    nominal_tree = cKDTree(nominal_mesh.nodes)
+    sample_centres = _landmark_centres(sample["_contour"], np.asarray(sample["radial_breaks_mm"], dtype=np.float64))
+    nominal_centres = _landmark_centres(nominal["_contour"], np.asarray(nominal["radial_breaks_mm"], dtype=np.float64))
+    sample_stress = np.asarray(sample["_stress_max"], dtype=np.float64)
+    nominal_stress = np.asarray(nominal["_stress_max"], dtype=np.float64)
+    sample_loglife_nodes = np.log10(np.maximum(np.asarray(sample["_life_raw"], dtype=np.float64), 1e-300))
+    nominal_loglife_nodes = np.log10(np.maximum(np.asarray(nominal["_life_raw"], dtype=np.float64), 1e-300))
+    for landmark, radius in LANDMARK_NEIGHBOURHOODS_MM.items():
+        if landmark not in sample_centres or landmark not in nominal_centres:
+            continue
+        s_idx = _local_indices(sample_tree, sample_centres[landmark], radius, len(sample_mesh.nodes))
+        n_idx = _local_indices(nominal_tree, nominal_centres[landmark], radius, len(nominal_mesh.nodes))
+        s_ll = sample_loglife_nodes[s_idx]
+        n_ll = nominal_loglife_nodes[n_idx]
+        out[landmark] = {
+            "delta_p90_stress_mpa": float(np.percentile(sample_stress[s_idx], 90) - np.percentile(nominal_stress[n_idx], 90)),
+            "delta_median_loglife": float(np.median(s_ll) - np.median(n_ll)),
+            "delta_p05_loglife": float(np.percentile(s_ll, 5) - np.percentile(n_ll, 5)),
+            "delta_min_loglife": float(np.min(s_ll) - np.min(n_ll)),
+        }
+    return out
 
 
 def _landmark_delta_table(sample: Dict[str, Any], nominal: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
@@ -812,6 +944,16 @@ def _life_sensitivity_audit(
     out_dir: Path,
     save_plots: bool,
 ) -> Dict[str, Any]:
+    if "_contour" not in nominal_raw or "_mesh" not in nominal_raw:
+        summary = {
+            "num_samples": len(lhs_results_raw),
+            "num_valid_samples": 0,
+            "error": "missing_nominal_reference",
+        }
+        _write_csv(out_dir / "lhs_geometry_to_life_sensitivity.csv", [])
+        _write_csv(out_dir / "severe_life_change_cases.csv", [])
+        _write_json(out_dir / "lhs_geometry_to_life_sensitivity_summary.json", summary)
+        return summary
     all_keys = list(PUBLIC_GEOMETRY_PARAMETERS) + list(RIM_FEATURE_PARAMETERS)
     cgroove_keys = [
         "front_cgroove_axial_depth",
@@ -829,9 +971,12 @@ def _life_sensitivity_audit(
         "rear_arm_outer_corner_radius",
     ]
     allowed_half = _compute_allowed_actual_half_ranges(lhs_results_raw, all_keys)
-    nominal_points, nominal_loglife_contour = _contour_log_life_profile(nominal_raw)
+    nominal_points, nominal_loglife_contour, nominal_stress_contour, _, _ = _contour_log_life_profile(nominal_raw)
+    nominal_tree = cKDTree(nominal_raw["_mesh"].nodes)
     rows: List[Dict[str, Any]] = []
+    severe_rows: List[Dict[str, Any]] = []
     landmark_names = list(LANDMARK_NEIGHBOURHOODS_MM.keys())
+    robust_delta_all: List[np.ndarray] = []
 
     for sample in lhs_results_raw:
         row: Dict[str, Any] = {
@@ -847,8 +992,11 @@ def _life_sensitivity_audit(
             rows.append(row)
             continue
 
-        sample_points, sample_loglife_contour = _contour_log_life_profile(sample, n_samples=len(nominal_points))
+        sample_points, sample_loglife_contour, sample_stress_contour, sample_curvature, sample_curv_grad = _contour_log_life_profile(
+            sample, n_samples=len(nominal_points)
+        )
         delta_contour = sample_loglife_contour - nominal_loglife_contour
+        robust_delta_all.append(delta_contour)
         min_idx = int(np.argmin(delta_contour))
         controlling_landmark, _ = _nearest_landmark(sample_points[min_idx], sample["_contour"])
 
@@ -862,23 +1010,73 @@ def _life_sensitivity_audit(
                 "median_loglife": float(np.median(np.log10(np.maximum(sample_life, 1e-300)))),
                 "delta_loglife_min": float(np.min(delta_contour)),
                 "delta_loglife_median": float(np.median(delta_contour)),
+                "delta_loglife_p01": float(np.percentile(delta_contour, 1)),
                 "delta_loglife_p05": float(np.percentile(delta_contour, 5)),
+                "delta_loglife_p10": float(np.percentile(delta_contour, 10)),
+                "delta_loglife_p90": float(np.percentile(delta_contour, 90)),
+                "delta_loglife_p99": float(np.percentile(delta_contour, 99)),
                 "delta_loglife_p95": float(np.percentile(delta_contour, 95)),
                 "delta_loglife_max_abs": float(np.max(np.abs(delta_contour))),
+                "fraction_contour_delta_loglife_le_neg0p3": float(np.mean(delta_contour <= -0.3)),
+                "fraction_contour_delta_loglife_le_neg0p5": float(np.mean(delta_contour <= -0.5)),
+                "fraction_contour_delta_loglife_le_neg1p0": float(np.mean(delta_contour <= -1.0)),
+                "fraction_contour_delta_loglife_le_neg2p0": float(np.mean(delta_contour <= -2.0)),
                 "controlling_feature_or_landmark": controlling_landmark,
                 "delta_global_peak_stress_mpa": float(stress_peak_sample - stress_peak_nom),
                 "delta_global_min_loglife_vs_nominal": float(
                     np.min(np.log10(np.maximum(sample_life, 1e-300))) - np.min(np.log10(np.maximum(nominal_life, 1e-300)))
                 ),
+                "severe_coordinate_x_mm": float(sample_points[min_idx, 0]),
+                "severe_coordinate_r_mm": float(sample_points[min_idx, 1]),
+                "severe_local_stress_mpa": float(sample_stress_contour[min_idx]),
+                "severe_local_stress_delta_mpa": float(sample_stress_contour[min_idx] - nominal_stress_contour[min_idx]),
             }
         )
-        landmark_deltas = _landmark_delta_table(sample, nominal_raw)
+        landmark_deltas = _landmark_delta_stats(sample, nominal_raw)
         for landmark, metrics in landmark_deltas.items():
             row[f"delta_p90_stress__{landmark}"] = metrics["delta_p90_stress_mpa"]
             row[f"delta_median_loglife__{landmark}"] = metrics["delta_median_loglife"]
+            row[f"delta_p05_loglife__{landmark}"] = metrics["delta_p05_loglife"]
+            row[f"delta_min_loglife__{landmark}"] = metrics["delta_min_loglife"]
         rows.append(row)
 
+        if row["delta_loglife_min"] <= -2.0:
+            sample_tree = cKDTree(sample["_mesh"].nodes)
+            severe_coord = sample_points[min_idx]
+            severe_node = int(sample_tree.query(severe_coord, k=1)[1])
+            nom_node = int(nominal_tree.query(nominal_points[min_idx], k=1)[1])
+            mesh_metrics = _local_mesh_metrics(sample["_mesh"], severe_node, severe_coord, radius_mm=1.0)
+            severe_rows.append({
+                "sample_id": sample.get("sample_id"),
+                "case_id": sample.get("case_id"),
+                "requested_normalized_controls": json.dumps(sample.get("cgroove_controls_requested", {}), sort_keys=True),
+                "resolved_pre_sanitization_cgroove_params_mm": json.dumps(
+                    {k: float(sample.get("resolved_rim", {}).get(k, np.nan)) for k in COUPLED_CGROOVE_PARAMETERS},
+                    sort_keys=True,
+                ),
+                "final_actual_cgroove_params_mm": json.dumps(
+                    {k: float(sample.get("actual_rim", {}).get(k, np.nan)) for k in COUPLED_CGROOVE_PARAMETERS},
+                    sort_keys=True,
+                ),
+                "severe_point_x_mm": float(severe_coord[0]),
+                "severe_point_r_mm": float(severe_coord[1]),
+                "severe_landmark": controlling_landmark,
+                "named_region": str(sample.get("controlling_subzone", "unknown")),
+                "local_stress_mpa": float(sample_stress_contour[min_idx]),
+                "local_stress_increase_vs_nominal_mpa": float(sample_stress_contour[min_idx] - nominal_stress_contour[min_idx]),
+                "local_mesh_size_mm": mesh_metrics["local_mesh_size_mm"],
+                "local_node_density_per_mm2": mesh_metrics["local_node_density_per_mm2"],
+                "local_curvature_1_per_mm": float(sample_curvature[min_idx]),
+                "local_curvature_gradient_1_per_mm2": float(sample_curv_grad[min_idx]),
+                "min_delta_log10_life": float(row["delta_loglife_min"]),
+                "local_delta_log10_life": float(delta_contour[min_idx]),
+                "sample_local_stress_node_mpa": float(np.asarray(sample["_stress_max"], dtype=np.float64)[severe_node]),
+                "nominal_local_stress_node_mpa": float(np.asarray(nominal_raw["_stress_max"], dtype=np.float64)[nom_node]),
+                "mesh_feature_stability_flag": "requires_medium_fine_check",
+            })
+
     _write_csv(out_dir / "lhs_geometry_to_life_sensitivity.csv", rows)
+    _write_csv(out_dir / "severe_life_change_cases.csv", severe_rows)
 
     finite_rows = [r for r in rows if np.isfinite(r.get("delta_loglife_min", np.nan))]
     corr_rows = []
@@ -898,15 +1096,29 @@ def _life_sensitivity_audit(
     summary = {
         "num_samples": len(rows),
         "num_valid_samples": len(finite_rows),
+        "contour_correspondence_method": "uniform_arc_length_resampling_with_nearest_fem_node_query",
         "delta_loglife_min_distribution": {
             "min": float(np.min([r["delta_loglife_min"] for r in finite_rows])) if finite_rows else np.nan,
             "p05": float(np.percentile([r["delta_loglife_min"] for r in finite_rows], 5)) if finite_rows else np.nan,
             "median": float(np.median([r["delta_loglife_min"] for r in finite_rows])) if finite_rows else np.nan,
             "p95": float(np.percentile([r["delta_loglife_min"] for r in finite_rows], 95)) if finite_rows else np.nan,
         },
+        "robust_delta_loglife_contour_distribution": {
+            "p01": float(np.percentile(np.concatenate(robust_delta_all), 1)) if robust_delta_all else np.nan,
+            "p05": float(np.percentile(np.concatenate(robust_delta_all), 5)) if robust_delta_all else np.nan,
+            "p10": float(np.percentile(np.concatenate(robust_delta_all), 10)) if robust_delta_all else np.nan,
+            "median": float(np.percentile(np.concatenate(robust_delta_all), 50)) if robust_delta_all else np.nan,
+            "p90": float(np.percentile(np.concatenate(robust_delta_all), 90)) if robust_delta_all else np.nan,
+            "p99": float(np.percentile(np.concatenate(robust_delta_all), 99)) if robust_delta_all else np.nan,
+            "fraction_le_neg0p3": float(np.mean(np.concatenate(robust_delta_all) <= -0.3)) if robust_delta_all else np.nan,
+            "fraction_le_neg0p5": float(np.mean(np.concatenate(robust_delta_all) <= -0.5)) if robust_delta_all else np.nan,
+            "fraction_le_neg1p0": float(np.mean(np.concatenate(robust_delta_all) <= -1.0)) if robust_delta_all else np.nan,
+            "fraction_le_neg2p0": float(np.mean(np.concatenate(robust_delta_all) <= -2.0)) if robust_delta_all else np.nan,
+        },
         "sensitivity_correlation_ranked": corr_rows,
         "allowed_actual_half_ranges_mm": allowed_half,
         "landmarks_reported": landmark_names,
+        "severe_case_count_min_delta_le_neg2": int(len(severe_rows)),
     }
     _write_json(out_dir / "lhs_geometry_to_life_sensitivity_summary.json", summary)
 
@@ -1400,6 +1612,14 @@ def run_validation(case: str, output_dir: Path, mesh_name: str, save_plots: bool
             "seed": int(seed),
         }
         nominal_raw = validate_geometry_case(nominal_spec, mesh_name, out_dir, save_plots=False)
+        retry_count = 0
+        while ("_contour" not in nominal_raw or nominal_raw.get("status") == "FAIL") and retry_count < 2:
+            retry_count += 1
+            nominal_raw = validate_geometry_case(nominal_spec, mesh_name, out_dir, save_plots=False)
+        if "_contour" not in nominal_raw or nominal_raw.get("status") == "FAIL":
+            fallback = next((r for r in lhs_results_raw if r.get("status") == "PASS" and "_contour" in r), None)
+            if fallback is not None:
+                nominal_raw = fallback
         _write_csv(out_dir / "lhs_coverage_controls.csv", lhs_rows_controls)
         _write_csv(out_dir / "lhs_coverage_requested.csv", lhs_rows_requested)
         _write_csv(out_dir / "lhs_coverage_actual.csv", lhs_rows_actual)

@@ -490,43 +490,66 @@ def map_cgroove_controls_to_parameters(
     rf_root_max = max(min(0.45 * neck_t, 0.45 * (h_arm - neck_t)), 0.2)
     rf_root = min(max(float(resolved_rim["rear_arm_root_radius"]), 0.2), rf_root_max)
 
-    pos_min = 0.38
-    span_min = 1.50
-    entry_min = 0.15
-    floor_min = 0.15
-    exit_min = 0.15
-    clearance_mm = 0.25
-    top_term = rf_root + 0.3 + clearance_mm
+    def _cfg_bounds(key: str) -> tuple[float, float]:
+        lo = float(NOMINAL_RIM_FEATURE_MM[key] + MIN_RIM_FEATURE_OFFSET_MM[key])
+        hi = float(NOMINAL_RIM_FEATURE_MM[key] + MAX_RIM_FEATURE_OFFSET_MM[key])
+        return lo, hi
 
-    pos_max_phys = h_arm - top_term - (span_min + entry_min + exit_min)
-    pos_max_cons = pos_min + 0.85 * max(pos_max_phys - pos_min, 0.0)
-    cg_pos = _lerp(pos_min, max(pos_min, pos_max_cons), c["cgroove_radial_pos_control"])
-    cg_pos = max(cg_pos, 0.3)
+    pos_lo_cfg, pos_hi_cfg = _cfg_bounds("front_cgroove_radial_pos")
+    span_lo_cfg, span_hi_cfg = _cfg_bounds("front_cgroove_radial_span")
+    entry_lo_cfg, entry_hi_cfg = _cfg_bounds("front_cgroove_entry_radius")
+    floor_lo_cfg, floor_hi_cfg = _cfg_bounds("front_cgroove_floor_radius")
+    exit_lo_cfg, exit_hi_cfg = _cfg_bounds("front_cgroove_exit_radius")
 
-    entry_cap_phys = 0.8 * cg_pos
-    entry_cap_budget = h_arm - (cg_pos + top_term + span_min + exit_min)
-    entry_cap = min(entry_cap_phys, entry_cap_budget)
-    entry_hi = entry_min + 0.85 * max(entry_cap - entry_min, 0.0)
-    rf_entry = _lerp(entry_min, max(entry_min, entry_hi), c["cgroove_entry_radius_fraction"])
+    geometric_clearance_mm = 0.30
+    span_floor_req = floor_lo_cfg / 0.225 + 0.05
+    span_lo_target = max(span_lo_cfg, span_floor_req)
 
-    span_cap_budget = h_arm - (cg_pos + rf_entry + top_term + exit_min)
-    span_hi = span_min + 0.85 * max(span_cap_budget - span_min, 0.0)
-    cg_span = _lerp(span_min, max(span_min, span_hi), c["cgroove_span_fraction"])
+    pos_hi_phys = h_arm - (rf_root + geometric_clearance_mm + span_lo_target + entry_lo_cfg + exit_lo_cfg)
+    pos_lo = max(pos_lo_cfg, 0.3)
+    pos_hi = min(pos_hi_cfg, pos_hi_phys)
+    if pos_hi < pos_lo:
+        pos_hi = pos_lo
+    cg_pos = _lerp(pos_lo, pos_hi, c["cgroove_radial_pos_control"])
 
-    exit_cap_phys = 0.45 * min(max(h_arm - cg_pos - cg_span, 0.0), cg_span)
-    exit_cap_budget = h_arm - (cg_pos + rf_entry + cg_span + rf_root + 0.3)
-    exit_cap = min(exit_cap_phys, exit_cap_budget)
-    exit_hi = exit_min + 0.85 * max(exit_cap - exit_min, 0.0)
-    rf_exit = _lerp(exit_min, max(exit_min, exit_hi), c["cgroove_exit_radius_fraction"])
+    entry_hi_phys = min(
+        0.8 * cg_pos,
+        h_arm - (cg_pos + span_lo_target + exit_lo_cfg + rf_root + geometric_clearance_mm),
+    )
+    entry_lo = entry_lo_cfg
+    entry_hi = min(entry_hi_cfg, entry_hi_phys)
+    if entry_hi < entry_lo:
+        entry_hi = entry_lo
+    rf_entry = _lerp(entry_lo, entry_hi, c["cgroove_entry_radius_fraction"])
 
-    required_h = cg_pos + rf_entry + cg_span + rf_exit + rf_root + 0.3
-    allowed_h = h_arm - 0.10
+    span_hi_phys = h_arm - (cg_pos + rf_entry + exit_lo_cfg + rf_root + geometric_clearance_mm)
+    span_lo = span_lo_target
+    span_hi = min(span_hi_cfg, span_hi_phys)
+    if span_hi < span_lo:
+        span_hi = span_lo
+    cg_span = _lerp(span_lo, span_hi, c["cgroove_span_fraction"])
+
+    exit_hi_phys = min(
+        0.45 * min(max(h_arm - cg_pos - cg_span, 0.0), cg_span),
+        h_arm - (cg_pos + rf_entry + cg_span + rf_root + geometric_clearance_mm),
+    )
+    exit_lo = exit_lo_cfg
+    exit_hi = min(exit_hi_cfg, exit_hi_phys)
+    if exit_hi < exit_lo:
+        exit_hi = exit_lo
+    rf_exit = _lerp(exit_lo, exit_hi, c["cgroove_exit_radius_fraction"])
+
+    required_h = cg_pos + rf_entry + cg_span + rf_exit + rf_root + geometric_clearance_mm
+    allowed_h = h_arm
     if required_h > allowed_h:
-        cg_span = max(1.0, cg_span - (required_h - allowed_h))
+        cg_span = max(span_lo_cfg, cg_span - (required_h - allowed_h))
 
     floor_cap = 0.225 * cg_span
-    floor_hi = floor_min + 0.85 * max(floor_cap - floor_min, 0.0)
-    rf_floor = _lerp(floor_min, max(floor_min, floor_hi), c["cgroove_floor_radius_fraction"])
+    floor_lo = floor_lo_cfg
+    floor_hi = min(floor_hi_cfg, floor_cap)
+    if floor_hi < floor_lo:
+        floor_hi = floor_lo
+    rf_floor = _lerp(floor_lo, floor_hi, c["cgroove_floor_radius_fraction"])
 
     params = {
         "front_cgroove_radial_pos": float(cg_pos),
@@ -536,8 +559,7 @@ def map_cgroove_controls_to_parameters(
         "front_cgroove_exit_radius": float(rf_exit),
     }
     for key in COUPLED_CGROOVE_PARAMETERS:
-        lo = float(NOMINAL_RIM_FEATURE_MM[key] + MIN_RIM_FEATURE_OFFSET_MM[key])
-        hi = float(NOMINAL_RIM_FEATURE_MM[key] + MAX_RIM_FEATURE_OFFSET_MM[key])
+        lo, hi = _cfg_bounds(key)
         params[key] = float(np.clip(params[key], lo, hi))
 
     required_h_after_clip = (
@@ -546,7 +568,7 @@ def map_cgroove_controls_to_parameters(
         + params["front_cgroove_radial_span"]
         + params["front_cgroove_exit_radius"]
         + rf_root
-        + 0.3
+        + geometric_clearance_mm
     )
     if required_h_after_clip > h_arm - 0.05:
         overflow = required_h_after_clip - (h_arm - 0.05)
@@ -559,11 +581,20 @@ def map_cgroove_controls_to_parameters(
         "effective_h_arm_mm": float(h_arm),
         "effective_neck_thickness_mm": float(neck_t),
         "effective_root_radius_mm": float(rf_root),
-        "clearance_mm": float(clearance_mm),
-        "position_max_phys_mm": float(pos_max_phys),
-        "entry_cap_mm": float(entry_cap),
-        "span_cap_budget_mm": float(span_cap_budget),
-        "exit_cap_mm": float(exit_cap),
+        "geometric_clearance_mm": float(geometric_clearance_mm),
+        "configured_floor_lower_bound_mm": float(floor_lo_cfg),
+        "span_min_required_for_floor_lower_mm": float(span_floor_req),
+        "position_max_phys_mm": float(pos_hi_phys),
+        "position_sampling_min_mm": float(pos_lo),
+        "position_sampling_max_mm": float(pos_hi),
+        "entry_sampling_min_mm": float(entry_lo),
+        "entry_sampling_max_mm": float(entry_hi),
+        "span_sampling_min_mm": float(span_lo),
+        "span_sampling_max_mm": float(span_hi),
+        "exit_sampling_min_mm": float(exit_lo),
+        "exit_sampling_max_mm": float(exit_hi),
         "floor_cap_mm": float(floor_cap),
+        "floor_sampling_min_mm": float(floor_lo),
+        "floor_sampling_max_mm": float(floor_hi),
     }
     return params, meta
