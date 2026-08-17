@@ -15,13 +15,18 @@ DEFAULT_NUM_SAMPLES = 200
 
 try:
     from .config import (
+        CGROOVE_SAMPLING_CONTROLS,
         MAX_OFFSET_MM,
+        MAX_CGROOVE_CONTROL,
         MAX_RIM_FEATURE_OFFSET_MM,
         MIN_OFFSET_MM,
+        MIN_CGROOVE_CONTROL,
         MIN_RIM_FEATURE_OFFSET_MM,
+        NON_COUPLED_RIM_FEATURE_PARAMETERS,
         PUBLIC_GEOMETRY_PARAMETERS,
         RIM_FEATURE_PARAMETERS,
         REPRESENTATIONS,
+        clip_cgroove_controls_to_bounds,
         clip_offsets_to_bounds,
         clip_rim_feature_offsets_to_bounds,
     )
@@ -32,13 +37,18 @@ except ImportError:
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from Data_gen.config import (
+        CGROOVE_SAMPLING_CONTROLS,
         MAX_OFFSET_MM,
+        MAX_CGROOVE_CONTROL,
         MAX_RIM_FEATURE_OFFSET_MM,
         MIN_OFFSET_MM,
+        MIN_CGROOVE_CONTROL,
         MIN_RIM_FEATURE_OFFSET_MM,
+        NON_COUPLED_RIM_FEATURE_PARAMETERS,
         PUBLIC_GEOMETRY_PARAMETERS,
         RIM_FEATURE_PARAMETERS,
         REPRESENTATIONS,
+        clip_cgroove_controls_to_bounds,
         clip_offsets_to_bounds,
         clip_rim_feature_offsets_to_bounds,
     )
@@ -120,27 +130,58 @@ def sample_offsets_lhs(
     return out
 
 
+def sample_rim_feature_lhs_design(
+    num_samples: int,
+    min_offsets: Dict[str, float],
+    max_offsets: Dict[str, float],
+    seed: int,
+) -> List[Dict[str, Dict[str, float]]]:
+    """Sample rim-feature design with coupled normalized controls for C-groove."""
+    d_mm = len(NON_COUPLED_RIM_FEATURE_PARAMETERS)
+    d_ctrl = len(CGROOVE_SAMPLING_CONTROLS)
+
+    lhs_mm = LatinHypercube(d=d_mm, seed=(seed + 999983) % (2**31 - 1))
+    u_mm = lhs_mm.random(n=num_samples)
+    lo_mm = np.array([min_offsets[k] for k in NON_COUPLED_RIM_FEATURE_PARAMETERS], dtype=np.float64)
+    hi_mm = np.array([max_offsets[k] for k in NON_COUPLED_RIM_FEATURE_PARAMETERS], dtype=np.float64)
+    vec_mm = lo_mm[None, :] + u_mm * (hi_mm - lo_mm)[None, :]
+
+    lhs_ctrl = LatinHypercube(d=d_ctrl, seed=(seed + 1_999_966) % (2**31 - 1))
+    u_ctrl = lhs_ctrl.random(n=num_samples)
+    lo_ctrl = np.array([MIN_CGROOVE_CONTROL[k] for k in CGROOVE_SAMPLING_CONTROLS], dtype=np.float64)
+    hi_ctrl = np.array([MAX_CGROOVE_CONTROL[k] for k in CGROOVE_SAMPLING_CONTROLS], dtype=np.float64)
+    vec_ctrl = lo_ctrl[None, :] + u_ctrl * (hi_ctrl - lo_ctrl)[None, :]
+
+    out: List[Dict[str, Dict[str, float]]] = []
+    for row_mm, row_ctrl in zip(vec_mm, vec_ctrl):
+        offsets = {k: 0.0 for k in RIM_FEATURE_PARAMETERS}
+        offsets.update({k: float(v) for k, v in zip(NON_COUPLED_RIM_FEATURE_PARAMETERS, row_mm)})
+        controls = {k: float(v) for k, v in zip(CGROOVE_SAMPLING_CONTROLS, row_ctrl)}
+        out.append(
+            {
+                "rim_feature_offsets": clip_rim_feature_offsets_to_bounds(offsets),
+                "cgroove_controls_requested": clip_cgroove_controls_to_bounds(controls),
+            }
+        )
+    return out
+
+
 def sample_rim_feature_offsets_lhs(
     num_samples: int,
     min_offsets: Dict[str, float],
     max_offsets: Dict[str, float],
     seed: int,
 ) -> List[Dict[str, float]]:
-    """LHS sample of rim-feature parameter offsets, independent of the main geometry LHS."""
-    d = len(RIM_FEATURE_PARAMETERS)
-    # Use a different seed offset for the rim-feature LHS to ensure independence.
-    lhs = LatinHypercube(d=d, seed=(seed + 999983) % (2**31 - 1))
-    u = lhs.random(n=num_samples)
-
-    lo = np.array([min_offsets[k] for k in RIM_FEATURE_PARAMETERS], dtype=np.float64)
-    hi = np.array([max_offsets[k] for k in RIM_FEATURE_PARAMETERS], dtype=np.float64)
-    vec = lo[None, :] + u * (hi - lo)[None, :]
-
-    out: List[Dict[str, float]] = []
-    for row in vec:
-        row_dict = {k: float(v) for k, v in zip(RIM_FEATURE_PARAMETERS, row)}
-        out.append(clip_rim_feature_offsets_to_bounds(row_dict))
-    return out
+    """Backward-compatible offsets-only LHS sampling interface."""
+    return [
+        item["rim_feature_offsets"]
+        for item in sample_rim_feature_lhs_design(
+            num_samples=num_samples,
+            min_offsets=min_offsets,
+            max_offsets=max_offsets,
+            seed=seed,
+        )
+    ]
 
 
 def validate_lhs_spread(num_samples: int = 30, seed: int = 7) -> bool:
@@ -157,12 +198,13 @@ def validate_lhs_spread(num_samples: int = 30, seed: int = 7) -> bool:
         max_offsets=MAX_OFFSET_MM,
         seed=seed,
     )
-    rim_feature_list = sample_rim_feature_offsets_lhs(
+    rim_design_list = sample_rim_feature_lhs_design(
         num_samples=num_samples,
         min_offsets=MIN_RIM_FEATURE_OFFSET_MM,
         max_offsets=MAX_RIM_FEATURE_OFFSET_MM,
         seed=seed,
     )
+    rim_feature_list = [item["rim_feature_offsets"] for item in rim_design_list]
 
     all_pass = True
 
@@ -187,6 +229,15 @@ def validate_lhs_spread(num_samples: int = 30, seed: int = 7) -> bool:
         expected_range = hi - lo
         ok = spread > 0.5 * expected_range
         print(f"  [{'PASS' if ok else 'FAIL'}] rim_feature/{k}: spread={spread:.4f} (range={expected_range:.4f})")
+        if not ok:
+            all_pass = False
+
+    for k in CGROOVE_SAMPLING_CONTROLS:
+        vals = np.array([d["cgroove_controls_requested"][k] for d in rim_design_list], dtype=np.float64)
+        spread = float(vals.max() - vals.min())
+        expected_range = float(MAX_CGROOVE_CONTROL[k] - MIN_CGROOVE_CONTROL[k])
+        ok = spread > 0.5 * expected_range
+        print(f"  [{'PASS' if ok else 'FAIL'}] cgroove_control/{k}: spread={spread:.4f} (range={expected_range:.4f})")
         if not ok:
             all_pass = False
 
@@ -275,6 +326,7 @@ def generate_dataset(
 
     n_samples = len(offsets_list)
 
+    rim_feature_controls_list: List[Dict[str, float] | None]
     if explicit_rim_feature_offsets is not None:
         if len(explicit_rim_feature_offsets) != n_samples:
             raise ValueError(
@@ -282,15 +334,18 @@ def generate_dataset(
                 f"!= offsets_list length {n_samples}"
             )
         rim_feature_offsets_list = [clip_rim_feature_offsets_to_bounds(d) for d in explicit_rim_feature_offsets]
+        rim_feature_controls_list = [None for _ in range(n_samples)]
     else:
         min_rf = lhs_min_rim_feature_offsets or MIN_RIM_FEATURE_OFFSET_MM
         max_rf = lhs_max_rim_feature_offsets or MAX_RIM_FEATURE_OFFSET_MM
-        rim_feature_offsets_list = sample_rim_feature_offsets_lhs(
+        rim_design_list = sample_rim_feature_lhs_design(
             num_samples=n_samples,
             min_offsets=min_rf,
             max_offsets=max_rf,
             seed=int(seed),
         )
+        rim_feature_offsets_list = [item["rim_feature_offsets"] for item in rim_design_list]
+        rim_feature_controls_list = [item["cgroove_controls_requested"] for item in rim_design_list]
 
     h5f = create_dataset_file(
         output_h5_path=output_h5_path,
@@ -300,8 +355,8 @@ def generate_dataset(
     )
     import tqdm
     try:
-        for sample_id, (offsets, rim_feature_offs) in tqdm.tqdm(
-            enumerate(zip(offsets_list, rim_feature_offsets_list)),
+        for sample_id, (offsets, rim_feature_offs, cgroove_controls) in tqdm.tqdm(
+            enumerate(zip(offsets_list, rim_feature_offsets_list, rim_feature_controls_list)),
             total=n_samples, desc="Generating samples"
         ):
             sample_seed = int((int(seed) * 1_000_003 + sample_id * 7_919 + 97) % (2**31 - 1))
@@ -313,6 +368,7 @@ def generate_dataset(
                 include_debug_fields=include_debug_fields,
                 lifing_mode=lifing_mode,
                 rim_feature_offsets=rim_feature_offs,
+                cgroove_sampling_controls=cgroove_controls,
             )
             write_sample_group(h5f, sample_id=sample_id, sample_seed=sample_seed, sample=sample)
     finally:

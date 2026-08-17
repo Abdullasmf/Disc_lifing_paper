@@ -112,9 +112,9 @@ The previous smooth flange/collar geometry has been replaced with:
 - `geometry.py`: `ContourData` gains `subzone_ids`/`subzone_names`; `sanitize_rim_feature_parameters()`;
   `_build_outer_cap_cgroove_arm()`; `build_disc_contour(..., rim_feature_params=...)`.
 - `physics.py`: Blade-equivalent traction applied via `FacetBasis`. (v6.0 changes location.)
-- `sample_generator.py`: `rim_feature_offsets` kwarg; passes face metadata to FEM.
-- `dataset_generator.py`: LHS samples all 11 rim-feature parameters.
-- `io_hdf5.py`: Stores `rim_feature_offsets` and `rim_feature_parameters_actual` per sample.
+- `sample_generator.py`: supports coupled C-groove normalized controls; stores resolved pre-sanitization + final sanitized rim-feature parameters.
+- `dataset_generator.py`: LHS samples non-coupled rim params in mm and C-groove controls in normalized space, then maps controls to mm before sanitization.
+- `io_hdf5.py`: stores requested C-groove controls, mapping metadata, resolved pre-sanitization rim-feature values, and final sanitized values per sample.
 - `mesh_ops.py`: Named refinement targets: C-groove, ligament, arm features.
 - `mesh_feature_diagnostics.py` *(new)*: Feature-neighbourhood diagnostics.
 - `compare_mesh_feature_diagnostics.py` *(new)*: Medium vs fine convergence.
@@ -139,6 +139,18 @@ All lengths in millimetres (mm). Nominal values defined in `NOMINAL_RIM_FEATURE_
 | `front_cgroove_floor_radius` | 0.8 | ±0.2 | Floor corner fillet radius |
 | `front_cgroove_exit_radius` | 0.8 | ±0.2 | Exit fillet radius |
 
+#### Coupled C-groove normalized controls (LHS space)
+
+| Control | Bounds | Mapped output |
+|---------|--------|---------------|
+| `cgroove_radial_pos_control` | [0.10, 0.90] | `front_cgroove_radial_pos` |
+| `cgroove_span_fraction` | [0.10, 0.90] | `front_cgroove_radial_span` |
+| `cgroove_entry_radius_fraction` | [0.10, 0.90] | `front_cgroove_entry_radius` |
+| `cgroove_floor_radius_fraction` | [0.10, 0.90] | `front_cgroove_floor_radius` |
+| `cgroove_exit_radius_fraction` | [0.10, 0.90] | `front_cgroove_exit_radius` |
+
+Mapping uses the same inequalities enforced by `sanitize_rim_feature_parameters()` and applies conservative clearance margins so controls do not fill geometric limits by default.
+
 #### Rear drive-arm parameters
 
 | Parameter | Nominal | Offset range | Description |
@@ -155,6 +167,7 @@ All lengths in millimetres (mm). Nominal values defined in `NOMINAL_RIM_FEATURE_
 - arm projection < 0.45 × bore_thickness (clearance constraint)
 - C-groove depth ≤ rim_thickness − 2 mm (minimum 2 mm ligament)
 - C-groove radial position + span ≤ arm radial height (groove within arm extent)
+- C-groove control mapping computes available space from the same inequalities before sanitization and records requested controls, resolved mm values, and final sanitized mm values.
 
 ---
 
@@ -378,6 +391,9 @@ force metadata for each load split.
 | Group | Content |
 |-------|---------|
 | `rim_feature_offsets/` | Per-key rim-feature offset values |
+| `cgroove_sampling_controls_requested/` | Requested normalized C-groove controls |
+| `cgroove_control_mapping_metadata/` | Per-sample control→mm mapping limits/clearance values |
+| `rim_feature_parameters_resolved_pre_sanitization/` | Rim-feature mm parameters before sanitizer |
 | `rim_feature_parameters_actual/` | Per-key resolved rim-feature values |
 
 ### New per-sample datasets

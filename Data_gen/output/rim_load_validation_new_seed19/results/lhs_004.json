@@ -1,0 +1,1373 @@
+{
+  "actual_core": {
+    "bore_height": 11.159410101363338,
+    "bore_radius_inner": 24.002950368255483,
+    "bore_thickness": 30.109743673355045,
+    "lower_fillet_radius": 2.1059891403750717,
+    "lower_transition_height": 8.270465639810544,
+    "rim_height": 15.244455785675097,
+    "rim_thickness": 20.3312135308374,
+    "upper_fillet_radius": 2.541967237357257,
+    "upper_transition_height": 8.613721316529167,
+    "web_height": 39.974493974026714,
+    "web_thickness": 10.194760764502828
+  },
+  "actual_rim": {
+    "front_cgroove_axial_depth": 6.362610331190465,
+    "front_cgroove_entry_radius": 1.0,
+    "front_cgroove_exit_radius": 0.6718642707581115,
+    "front_cgroove_floor_radius": 0.6000000000000001,
+    "front_cgroove_radial_pos": 1.3,
+    "front_cgroove_radial_span": 3.0,
+    "rear_arm_axial_projection": 8.386748327744817,
+    "rear_arm_neck_thickness": 4.486533530774835,
+    "rear_arm_outer_corner_radius": 1.2634136550171116,
+    "rear_arm_radial_height": 8.056945118748368,
+    "rear_arm_root_radius": 0.9756072260889077
+  },
+  "case_id": "lhs_004",
+  "case_name": "lhs_004",
+  "cgroove_controls_requested": {
+    "cgroove_entry_radius_fraction": 0.6143390532294433,
+    "cgroove_exit_radius_fraction": 0.8659647195580317,
+    "cgroove_floor_radius_fraction": 0.24088612620643976,
+    "cgroove_radial_pos_control": 0.5508377333293443,
+    "cgroove_span_fraction": 0.34793743352076945
+  },
+  "cgroove_mapping_metadata": {
+    "clearance_mm": 0.25,
+    "effective_h_arm_mm": 8.056945118748368,
+    "effective_neck_thickness_mm": 4.486533530774835,
+    "effective_root_radius_mm": 0.9756072260889077,
+    "entry_cap_mm": 1.9338791491849836,
+    "exit_cap_mm": 0.8589872736514349,
+    "floor_cap_mm": 0.42949363682571745,
+    "position_max_phys_mm": 4.731337892659461,
+    "span_cap_budget_mm": 2.88246832273009
+  },
+  "closure_error_rel": 1.7574776845853685e-16,
+  "controlling_subzone": "lower_transition",
+  "force_closure_valid": true,
+  "force_resultant_audit": {
+    "phases": [
+      {
+        "closure_error_rel": 2.7460588821646383e-16,
+        "effective_area_m2": 0.016068929336293444,
+        "expected_force_scale": 0.04000000000000001,
+        "omega_rad_s": 800.0,
+        "phase": "taxi",
+        "recovered_force_scale": 0.039999999999999994,
+        "recovered_resultant_force_n": 13247.999999999996,
+        "reference_omega_rad_s": 4000.0,
+        "target_resultant_force_n": 13248.0,
+        "traction_mpa": 0.8244482082622602,
+        "traction_pa": 824448.2082622602
+      },
+      {
+        "closure_error_rel": 1.7574776845853685e-16,
+        "effective_area_m2": 0.016068929336293444,
+        "expected_force_scale": 1.0,
+        "omega_rad_s": 4000.0,
+        "phase": "takeoff",
+        "recovered_force_scale": 1.0,
+        "recovered_resultant_force_n": 331199.99999999994,
+        "reference_omega_rad_s": 4000.0,
+        "target_resultant_force_n": 331200.0,
+        "traction_mpa": 20.611205206556505,
+        "traction_pa": 20611205.206556506
+      },
+      {
+        "closure_error_rel": 1.1881271529106062e-16,
+        "effective_area_m2": 0.016068929336293444,
+        "expected_force_scale": 0.7395999999999999,
+        "omega_rad_s": 3440.0,
+        "phase": "climb",
+        "recovered_force_scale": 0.7396000000000001,
+        "recovered_resultant_force_n": 244955.52,
+        "reference_omega_rad_s": 4000.0,
+        "target_resultant_force_n": 244955.52000000002,
+        "traction_mpa": 15.244047370769193,
+        "traction_pa": 15244047.370769193
+      },
+      {
+        "closure_error_rel": 1.4443439222430708e-16,
+        "effective_area_m2": 0.016068929336293444,
+        "expected_force_scale": 0.6084,
+        "omega_rad_s": 3120.0,
+        "phase": "cruise",
+        "recovered_force_scale": 0.6084,
+        "recovered_resultant_force_n": 201502.08,
+        "reference_omega_rad_s": 4000.0,
+        "target_resultant_force_n": 201502.08000000002,
+        "traction_mpa": 12.539857247668978,
+        "traction_pa": 12539857.24766898
+      },
+      {
+        "closure_error_rel": 2.9049217927030885e-16,
+        "effective_area_m2": 0.016068929336293444,
+        "expected_force_scale": 0.30250000000000005,
+        "omega_rad_s": 2200.0,
+        "phase": "descent",
+        "recovered_force_scale": 0.3025,
+        "recovered_resultant_force_n": 100187.99999999997,
+        "reference_omega_rad_s": 4000.0,
+        "target_resultant_force_n": 100188.0,
+        "traction_mpa": 6.234889574983343,
+        "traction_pa": 6234889.574983343
+      },
+      {
+        "closure_error_rel": 2.0764150337728835e-16,
+        "effective_area_m2": 0.016068929336293444,
+        "expected_force_scale": 0.2116,
+        "omega_rad_s": 1840.0,
+        "phase": "reverse_thrust",
+        "recovered_force_scale": 0.21159999999999998,
+        "recovered_resultant_force_n": 70081.91999999998,
+        "reference_omega_rad_s": 4000.0,
+        "target_resultant_force_n": 70081.92,
+        "traction_mpa": 4.361331021707357,
+        "traction_pa": 4361331.021707357
+      },
+      {
+        "closure_error_rel": 1.6950980754102706e-16,
+        "effective_area_m2": 0.016068929336293444,
+        "expected_force_scale": 0.0324,
+        "omega_rad_s": 720.0,
+        "phase": "taxi_return",
+        "recovered_force_scale": 0.032400000000000005,
+        "recovered_resultant_force_n": 10730.88,
+        "reference_omega_rad_s": 4000.0,
+        "target_resultant_force_n": 10730.880000000001,
+        "traction_mpa": 0.6678030486924308,
+        "traction_pa": 667803.0486924308
+      }
+    ],
+    "reference_phase": "takeoff"
+  },
+  "geometry_valid": true,
+  "group": "lhs",
+  "landmark_metrics": {
+    "front_cgroove_entry": {
+      "max_stress_mpa": 160.78938304566813,
+      "median_life_cycles": 722536217.9037926,
+      "min_life_cycles": 292277902.4094318,
+      "node_count": 105,
+      "p90_stress_mpa": 149.0489181851906
+    },
+    "front_cgroove_exit": {
+      "max_stress_mpa": 183.59856016743393,
+      "median_life_cycles": 216798570.9376434,
+      "min_life_cycles": 171928697.50025573,
+      "node_count": 101,
+      "p90_stress_mpa": 180.8827360851825
+    },
+    "front_cgroove_floor": {
+      "max_stress_mpa": 737.1008479817976,
+      "median_life_cycles": 66850965.037309736,
+      "min_life_cycles": 4394.638897386842,
+      "node_count": 273,
+      "p90_stress_mpa": 303.8173049948915
+    },
+    "lower_transition": {
+      "max_stress_mpa": 532.8651524150869,
+      "median_life_cycles": 11487347.685218247,
+      "min_life_cycles": 2535175.047012692,
+      "node_count": 569,
+      "p90_stress_mpa": 514.991261573363
+    },
+    "rear_arm_neck": {
+      "max_stress_mpa": 451.9703953840811,
+      "median_life_cycles": 980743.1636970232,
+      "min_life_cycles": 358490.5457051442,
+      "node_count": 138,
+      "p90_stress_mpa": 436.7702897792254
+    },
+    "rear_arm_outer_corner": {
+      "max_stress_mpa": 533.8758288980212,
+      "median_life_cycles": 119361.06145465045,
+      "min_life_cycles": 80099.1030636123,
+      "node_count": 74,
+      "p90_stress_mpa": 525.8908170756526
+    },
+    "rear_arm_root": {
+      "max_stress_mpa": 381.0871196619222,
+      "median_life_cycles": 2125937.3262677332,
+      "min_life_cycles": 1651112.6809531255,
+      "node_count": 63,
+      "p90_stress_mpa": 377.83186358461825
+    },
+    "rim_core_reference": {
+      "max_stress_mpa": 369.1745904887164,
+      "median_life_cycles": 10808636.24944397,
+      "min_life_cycles": 2179701.4562812205,
+      "node_count": 979,
+      "p90_stress_mpa": 349.9473993435785
+    },
+    "upper_transition": {
+      "max_stress_mpa": 526.8102366978248,
+      "median_life_cycles": 19384225.95330195,
+      "min_life_cycles": 482124.22655132826,
+      "node_count": 1380,
+      "p90_stress_mpa": 453.6568050848211
+    }
+  },
+  "life_stats": {
+    "fraction_life_lt_1": 0.0,
+    "fraction_life_lt_10": 0.0,
+    "fraction_life_lt_100": 8.237571563902961e-05,
+    "fraction_life_lt_1000": 0.00032950286255611845,
+    "global_min_life_cycles": 67.52942021577415,
+    "median_life_cycles": 11237792.347225001,
+    "median_log10_life": 7.050681002906814
+  },
+  "load_face_audit": {
+    "any_selected_facet_non_horizontal": false,
+    "any_selected_facet_on_unintended_region": false,
+    "any_selected_facet_outside_interval": false,
+    "expected_rim_top_r_mm": 115.32244230440872,
+    "loaded_face_area_mm2": 16068.929336293444,
+    "radial_deviation_per_facet_mm": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "selected_facet_count": 75,
+    "selected_facet_indices": [
+      989,
+      992,
+      993,
+      996,
+      997,
+      1000,
+      1001,
+      1004,
+      1005,
+      1008,
+      1009,
+      1012,
+      1013,
+      1016,
+      1017,
+      1020,
+      1021,
+      1024,
+      1025,
+      1028,
+      1029,
+      1032,
+      1033,
+      1036,
+      1037,
+      1040,
+      1041,
+      1044,
+      1045,
+      1049,
+      1208,
+      1211,
+      1214,
+      1217,
+      1220,
+      1223,
+      1226,
+      1229,
+      1232,
+      1235,
+      1238,
+      1241,
+      1244,
+      1247,
+      1250,
+      2484,
+      2487,
+      2492,
+      2495,
+      2500,
+      2503,
+      2509,
+      2512,
+      2517,
+      2520,
+      2525,
+      2528,
+      2533,
+      2537,
+      2542,
+      2545,
+      2551,
+      2554,
+      2560,
+      2563,
+      2569,
+      2572,
+      2578,
+      2581,
+      2586,
+      2589,
+      2594,
+      2597,
+      2603,
+      2606
+    ],
+    "selected_facet_midpoints_mm": [
+      [
+        -9.056932394100656,
+        115.32244230440872
+      ],
+      [
+        -8.097733412648934,
+        115.32244230440872
+      ],
+      [
+        -7.831599122190025,
+        115.32244230440872
+      ],
+      [
+        -6.872400140738314,
+        115.32244230440872
+      ],
+      [
+        -6.606265850279385,
+        115.32244230440872
+      ],
+      [
+        -5.647066868827675,
+        115.32244230440872
+      ],
+      [
+        -5.380932578368746,
+        115.32244230440872
+      ],
+      [
+        -4.421733596917037,
+        115.32244230440872
+      ],
+      [
+        -4.155599306458139,
+        115.32244230440872
+      ],
+      [
+        -3.1964003250063553,
+        115.32244230440872
+      ],
+      [
+        -2.9302660345474814,
+        115.32244230440872
+      ],
+      [
+        -1.9710670530957144,
+        115.32244230440872
+      ],
+      [
+        -1.7049327626368653,
+        115.32244230440872
+      ],
+      [
+        -0.7457337811850632,
+        115.32244230440872
+      ],
+      [
+        -0.4795994907261931,
+        115.32244230440872
+      ],
+      [
+        0.4795994907255482,
+        115.32244230440872
+      ],
+      [
+        0.7457337811844161,
+        115.32244230440872
+      ],
+      [
+        1.7049327626362147,
+        115.32244230440872
+      ],
+      [
+        1.9710670530950705,
+        115.32244230440872
+      ],
+      [
+        2.9302660345468383,
+        115.32244230440872
+      ],
+      [
+        3.1964003250057136,
+        115.32244230440872
+      ],
+      [
+        4.155599306457466,
+        115.32244230440872
+      ],
+      [
+        4.421733596916364,
+        115.32244230440872
+      ],
+      [
+        5.380932578368075,
+        115.32244230440872
+      ],
+      [
+        5.647066868827004,
+        115.32244230440872
+      ],
+      [
+        6.606265850278714,
+        115.32244230440872
+      ],
+      [
+        6.872400140737643,
+        115.32244230440872
+      ],
+      [
+        7.831599122189353,
+        115.32244230440872
+      ],
+      [
+        8.097733412648294,
+        115.32244230440872
+      ],
+      [
+        9.056932394100002,
+        115.32244230440872
+      ],
+      [
+        13.618978876834124,
+        115.32244230440872
+      ],
+      [
+        13.87207974313152,
+        115.32244230440872
+      ],
+      [
+        14.12518060942892,
+        115.32244230440872
+      ],
+      [
+        14.37828147572632,
+        115.32244230440872
+      ],
+      [
+        14.631382342023718,
+        115.32244230440872
+      ],
+      [
+        14.884483208321118,
+        115.32244230440872
+      ],
+      [
+        15.137584074618516,
+        115.32244230440872
+      ],
+      [
+        15.390684940915914,
+        115.32244230440872
+      ],
+      [
+        15.643785807213314,
+        115.32244230440872
+      ],
+      [
+        15.89688667351071,
+        115.32244230440872
+      ],
+      [
+        16.149987539808112,
+        115.32244230440872
+      ],
+      [
+        16.40308840610551,
+        115.32244230440872
+      ],
+      [
+        16.65618927240291,
+        115.32244230440872
+      ],
+      [
+        16.90929013870031,
+        115.32244230440872
+      ],
+      [
+        17.16239100499771,
+        115.32244230440872
+      ],
+      [
+        -8.750599076123956,
+        115.32244230440872
+      ],
+      [
+        -8.404066730627555,
+        115.32244230440872
+      ],
+      [
+        -7.525265804213145,
+        115.32244230440872
+      ],
+      [
+        -7.1787334587167555,
+        115.32244230440872
+      ],
+      [
+        -6.299932532302507,
+        115.32244230440872
+      ],
+      [
+        -5.953400186806117,
+        115.32244230440872
+      ],
+      [
+        -5.074599260391868,
+        115.32244230440872
+      ],
+      [
+        -4.728066914895477,
+        115.32244230440872
+      ],
+      [
+        -3.8492659884812745,
+        115.32244230440872
+      ],
+      [
+        -3.5027336429848095,
+        115.32244230440872
+      ],
+      [
+        -2.6239327165706126,
+        115.32244230440872
+      ],
+      [
+        -2.2774003710741653,
+        115.32244230440872
+      ],
+      [
+        -1.3985994446599703,
+        115.32244230440872
+      ],
+      [
+        -1.0520670991634875,
+        115.32244230440872
+      ],
+      [
+        -0.1732661727492772,
+        115.32244230440872
+      ],
+      [
+        0.17326617274714468,
+        115.32244230440872
+      ],
+      [
+        1.0520670991613124,
+        115.32244230440872
+      ],
+      [
+        1.3985994446577914,
+        115.32244230440872
+      ],
+      [
+        2.2774003710719337,
+        115.32244230440872
+      ],
+      [
+        2.623932716568383,
+        115.32244230440872
+      ],
+      [
+        3.5027336429825824,
+        115.32244230440872
+      ],
+      [
+        3.849265988479016,
+        115.32244230440872
+      ],
+      [
+        4.728066914893244,
+        115.32244230440872
+      ],
+      [
+        5.074599260389634,
+        115.32244230440872
+      ],
+      [
+        5.953400186803883,
+        115.32244230440872
+      ],
+      [
+        6.299932532300272,
+        115.32244230440872
+      ],
+      [
+        7.178733458714521,
+        115.32244230440872
+      ],
+      [
+        7.525265804210911,
+        115.32244230440872
+      ],
+      [
+        8.40406673062499,
+        115.32244230440872
+      ],
+      [
+        8.75059907612138,
+        115.32244230440872
+      ]
+    ],
+    "selected_facet_subzones": [
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_land",
+      "rear_arm_corner",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck",
+      "rear_arm_neck"
+    ],
+    "selected_meridional_face_length_mm": 22.176512073120566,
+    "selected_node_count": 77,
+    "selected_radius_max_mm": 115.32244230440872,
+    "selected_radius_mean_mm": 115.32244230440874,
+    "selected_radius_min_mm": 115.32244230440872,
+    "selected_x_range_mm": [
+      -9.056932394100656,
+      17.16239100499771
+    ]
+  },
+  "mesh": "medium",
+  "mesh_element_count": 47569,
+  "mesh_node_count": 24279,
+  "mesh_valid": true,
+  "nearest_peak_landmark": "lower_transition_end",
+  "nearest_peak_landmark_distance_mm": 5.275711130401913,
+  "peak_coordinate_mm": [
+    5.2009460312948725,
+    42.547790341222935
+  ],
+  "phase_scaling_audit": {
+    "acceptance_tolerance_rel": 0.02,
+    "landmarks": {
+      "front_cgroove_entry": {
+        "node_count": 105,
+        "radius_mm": 2.0,
+        "ratios": [
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.04000000000000001
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 1.1102230246251565e-16,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 1.5011127969512665e-14,
+            "stress_ratio": 0.7396
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.2116
+          },
+          {
+            "absolute_error": 6.938893903907228e-18,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 2.1416339209590212e-14,
+            "stress_ratio": 0.03239999999999999
+          }
+        ]
+      },
+      "front_cgroove_exit": {
+        "node_count": 101,
+        "radius_mm": 2.0,
+        "ratios": [
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.04000000000000001
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.7395999999999999
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.2116
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.0324
+          }
+        ]
+      },
+      "front_cgroove_floor": {
+        "node_count": 273,
+        "radius_mm": 2.0,
+        "ratios": [
+          {
+            "absolute_error": 6.938893903907228e-18,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 1.7347234759768068e-14,
+            "stress_ratio": 0.040000000000000015
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.7395999999999999
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 2.7755575615628914e-17,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 1.3117001708709315e-14,
+            "stress_ratio": 0.21160000000000004
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.0324
+          }
+        ]
+      },
+      "lower_transition": {
+        "node_count": 569,
+        "radius_mm": 4.0,
+        "ratios": [
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.04000000000000001
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.7395999999999999
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.2116
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.0324
+          }
+        ]
+      },
+      "rear_arm_neck": {
+        "node_count": 138,
+        "radius_mm": 1.5,
+        "ratios": [
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.04000000000000001
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.7395999999999999
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 2.7755575615628914e-17,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 1.3117001708709315e-14,
+            "stress_ratio": 0.21159999999999998
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.0324
+          }
+        ]
+      },
+      "rear_arm_outer_corner": {
+        "node_count": 74,
+        "radius_mm": 1.5,
+        "ratios": [
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.04000000000000001
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.7395999999999999
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.2116
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.0324
+          }
+        ]
+      },
+      "rear_arm_root": {
+        "node_count": 63,
+        "radius_mm": 1.5,
+        "ratios": [
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.04000000000000001
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.7395999999999999
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.2116
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.0324
+          }
+        ]
+      },
+      "rim_core_reference": {
+        "node_count": 979,
+        "radius_mm": 4.0,
+        "ratios": [
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.04000000000000001
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.7395999999999999
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 2.7755575615628914e-17,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 1.3117001708709315e-14,
+            "stress_ratio": 0.21160000000000004
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.0324
+          }
+        ]
+      },
+      "upper_transition": {
+        "node_count": 1380,
+        "radius_mm": 4.0,
+        "ratios": [
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.04000000000000001,
+            "phase": "taxi",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.04000000000000001
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 1.0,
+            "phase": "takeoff",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 1.0
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.7395999999999999,
+            "phase": "climb",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.7395999999999999
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.6084,
+            "phase": "cruise",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.6084
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.30250000000000005,
+            "phase": "descent",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.30250000000000005
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.2116,
+            "phase": "reverse_thrust",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.2116
+          },
+          {
+            "absolute_error": 0.0,
+            "expected_scale": 0.0324,
+            "phase": "taxi_return",
+            "relative_error_pct": 0.0,
+            "stress_ratio": 0.0324
+          }
+        ]
+      }
+    },
+    "reference_phase": "takeoff",
+    "worst_absolute_error": 1.1102230246251565e-16,
+    "worst_relative_error_pct": 1.1102230246251565e-14
+  },
+  "radial_breaks_mm": [
+    24.002950368255483,
+    35.16236046961882,
+    43.432826109429364,
+    83.40732008345609,
+    92.02104139998525,
+    107.26549718566035
+  ],
+  "requested_cgroove_controls": {
+    "cgroove_entry_radius_fraction": 0.6143390532294433,
+    "cgroove_exit_radius_fraction": 0.8659647195580317,
+    "cgroove_floor_radius_fraction": 0.24088612620643976,
+    "cgroove_radial_pos_control": 0.5508377333293443,
+    "cgroove_span_fraction": 0.34793743352076945
+  },
+  "requested_core_offsets": {
+    "bore_height": 0.15941010136333778,
+    "bore_radius_inner": 0.002950368255483393,
+    "bore_thickness": 0.10974367335504598,
+    "lower_fillet_radius": -0.09401085962492858,
+    "lower_transition_height": 0.27046563981054306,
+    "rim_height": 0.2444557856750963,
+    "rim_thickness": 0.3312135308373998,
+    "upper_fillet_radius": -0.05803276264274307,
+    "upper_transition_height": -0.38627868347083205,
+    "web_height": -0.02550602597328655,
+    "web_thickness": 0.19476076450282798
+  },
+  "requested_rim_offsets": {
+    "front_cgroove_axial_depth": 0.3626103311904654,
+    "front_cgroove_entry_radius": 0.19999999999999996,
+    "front_cgroove_exit_radius": -0.12813572924188854,
+    "front_cgroove_floor_radius": -0.19999999999999996,
+    "front_cgroove_radial_pos": 0.30000000000000004,
+    "front_cgroove_radial_span": -1.0,
+    "rear_arm_axial_projection": 0.38674832774481693,
+    "rear_arm_neck_thickness": 0.4865335307748353,
+    "rear_arm_outer_corner_radius": 0.26341365501711156,
+    "rear_arm_radial_height": 0.05694511874836827,
+    "rear_arm_root_radius": -0.02439277391109229
+  },
+  "resolved_core": {
+    "bore_height": 11.159410101363338,
+    "bore_radius_inner": 24.002950368255483,
+    "bore_thickness": 30.109743673355045,
+    "lower_fillet_radius": 2.1059891403750717,
+    "lower_transition_height": 8.270465639810544,
+    "rim_height": 15.244455785675097,
+    "rim_thickness": 20.3312135308374,
+    "upper_fillet_radius": 2.541967237357257,
+    "upper_transition_height": 8.613721316529167,
+    "web_height": 39.974493974026714,
+    "web_thickness": 10.194760764502828
+  },
+  "resolved_rim": {
+    "front_cgroove_axial_depth": 6.362610331190465,
+    "front_cgroove_entry_radius": 1.0,
+    "front_cgroove_exit_radius": 0.6718642707581115,
+    "front_cgroove_floor_radius": 0.6000000000000001,
+    "front_cgroove_radial_pos": 1.3,
+    "front_cgroove_radial_span": 3.0,
+    "rear_arm_axial_projection": 8.386748327744817,
+    "rear_arm_neck_thickness": 4.486533530774835,
+    "rear_arm_outer_corner_radius": 1.2634136550171116,
+    "rear_arm_radial_height": 8.056945118748368,
+    "rear_arm_root_radius": 0.9756072260889077
+  },
+  "rim_load_selection_valid": true,
+  "rim_top_metadata_mm": {
+    "blade_rim_top_r_mm": 115.32244230440872,
+    "blade_rim_top_x_max_mm": 18.552355093163516,
+    "blade_rim_top_x_min_mm": -10.1656067654187
+  },
+  "sample_id": 4,
+  "sanitized_core_parameters_changed": [],
+  "sanitized_rim_parameters_changed": [],
+  "seed": 19031830,
+  "selected_load_face_plot": "Data_gen/output/rim_load_validation_new_seed19/plots/lhs_004_selected_load_face.png",
+  "status": "PASS",
+  "status_reasons": [],
+  "stress_stats": {
+    "fraction_stress_gt_1300": 0.0,
+    "fraction_stress_gt_1500": 0.0,
+    "global_peak_stress_mpa": 1147.0786869444323,
+    "stress_p95_mpa": 588.6801124179937,
+    "stress_p99_mpa": 664.6827402539554
+  }
+}

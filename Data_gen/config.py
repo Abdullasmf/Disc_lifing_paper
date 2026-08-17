@@ -154,6 +154,26 @@ RIM_FEATURE_PARAMETERS = (
     "rear_arm_outer_corner_radius",  # fillet radius at arm outer (top-rear) corner
 )
 
+COUPLED_CGROOVE_PARAMETERS = (
+    "front_cgroove_radial_pos",
+    "front_cgroove_radial_span",
+    "front_cgroove_entry_radius",
+    "front_cgroove_floor_radius",
+    "front_cgroove_exit_radius",
+)
+
+NON_COUPLED_RIM_FEATURE_PARAMETERS = tuple(
+    p for p in RIM_FEATURE_PARAMETERS if p not in COUPLED_CGROOVE_PARAMETERS
+)
+
+CGROOVE_SAMPLING_CONTROLS = (
+    "cgroove_radial_pos_control",
+    "cgroove_span_fraction",
+    "cgroove_entry_radius_fraction",
+    "cgroove_floor_radius_fraction",
+    "cgroove_exit_radius_fraction",
+)
+
 NOMINAL_RIM_FEATURE_MM: Dict[str, float] = {
     "front_cgroove_axial_depth":    6.0,   # 6 mm inward from x_front (deeper groove)
     "front_cgroove_radial_span":    4.0,   # 4 mm groove height (wider groove)
@@ -194,6 +214,22 @@ MAX_RIM_FEATURE_OFFSET_MM: Dict[str, float] = {
     "rear_arm_neck_thickness":      +1.00,
     "rear_arm_root_radius":         +0.30,
     "rear_arm_outer_corner_radius": +0.30,
+}
+
+MIN_CGROOVE_CONTROL = {
+    "cgroove_radial_pos_control": 0.10,
+    "cgroove_span_fraction": 0.10,
+    "cgroove_entry_radius_fraction": 0.10,
+    "cgroove_floor_radius_fraction": 0.10,
+    "cgroove_exit_radius_fraction": 0.10,
+}
+
+MAX_CGROOVE_CONTROL = {
+    "cgroove_radial_pos_control": 0.90,
+    "cgroove_span_fraction": 0.90,
+    "cgroove_entry_radius_fraction": 0.90,
+    "cgroove_floor_radius_fraction": 0.90,
+    "cgroove_exit_radius_fraction": 0.90,
 }
 
 # ---------------------------------------------------------------------------
@@ -421,3 +457,113 @@ def rim_feature_offset_vector_to_dict(vector: np.ndarray) -> Dict[str, float]:
 
 def rim_feature_offsets_dict_to_vector(offsets: Dict[str, float]) -> np.ndarray:
     return np.array([float(offsets.get(k, 0.0)) for k in RIM_FEATURE_PARAMETERS], dtype=np.float64)
+
+
+def clip_cgroove_controls_to_bounds(controls: Dict[str, float] | None) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+    for k in CGROOVE_SAMPLING_CONTROLS:
+        v = 0.5 if controls is None else float(controls.get(k, 0.5))
+        out[k] = float(np.clip(v, MIN_CGROOVE_CONTROL[k], MAX_CGROOVE_CONTROL[k]))
+    return out
+
+
+def _lerp(lo: float, hi: float, u: float) -> float:
+    if hi <= lo:
+        return float(lo)
+    return float(lo + u * (hi - lo))
+
+
+def map_cgroove_controls_to_parameters(
+    controls: Dict[str, float],
+    resolved_rim: Dict[str, float],
+    t_rim: float,
+) -> tuple[Dict[str, float], Dict[str, float]]:
+    """Map normalized C-groove controls to physically coupled mm parameters.
+
+    Mapping uses the same inequalities enforced in sanitize_rim_feature_parameters,
+    with conservative clearance margins to avoid aggressive edge-filling.
+    """
+    c = clip_cgroove_controls_to_bounds(controls)
+
+    h_arm = min(max(float(resolved_rim["rear_arm_radial_height"]), 2.0), 0.55 * float(t_rim))
+    neck_t = min(max(float(resolved_rim["rear_arm_neck_thickness"]), 0.8), h_arm - 1.0)
+    rf_root_max = max(min(0.45 * neck_t, 0.45 * (h_arm - neck_t)), 0.2)
+    rf_root = min(max(float(resolved_rim["rear_arm_root_radius"]), 0.2), rf_root_max)
+
+    pos_min = 0.38
+    span_min = 1.50
+    entry_min = 0.15
+    floor_min = 0.15
+    exit_min = 0.15
+    clearance_mm = 0.25
+    top_term = rf_root + 0.3 + clearance_mm
+
+    pos_max_phys = h_arm - top_term - (span_min + entry_min + exit_min)
+    pos_max_cons = pos_min + 0.85 * max(pos_max_phys - pos_min, 0.0)
+    cg_pos = _lerp(pos_min, max(pos_min, pos_max_cons), c["cgroove_radial_pos_control"])
+    cg_pos = max(cg_pos, 0.3)
+
+    entry_cap_phys = 0.8 * cg_pos
+    entry_cap_budget = h_arm - (cg_pos + top_term + span_min + exit_min)
+    entry_cap = min(entry_cap_phys, entry_cap_budget)
+    entry_hi = entry_min + 0.85 * max(entry_cap - entry_min, 0.0)
+    rf_entry = _lerp(entry_min, max(entry_min, entry_hi), c["cgroove_entry_radius_fraction"])
+
+    span_cap_budget = h_arm - (cg_pos + rf_entry + top_term + exit_min)
+    span_hi = span_min + 0.85 * max(span_cap_budget - span_min, 0.0)
+    cg_span = _lerp(span_min, max(span_min, span_hi), c["cgroove_span_fraction"])
+
+    exit_cap_phys = 0.45 * min(max(h_arm - cg_pos - cg_span, 0.0), cg_span)
+    exit_cap_budget = h_arm - (cg_pos + rf_entry + cg_span + rf_root + 0.3)
+    exit_cap = min(exit_cap_phys, exit_cap_budget)
+    exit_hi = exit_min + 0.85 * max(exit_cap - exit_min, 0.0)
+    rf_exit = _lerp(exit_min, max(exit_min, exit_hi), c["cgroove_exit_radius_fraction"])
+
+    required_h = cg_pos + rf_entry + cg_span + rf_exit + rf_root + 0.3
+    allowed_h = h_arm - 0.10
+    if required_h > allowed_h:
+        cg_span = max(1.0, cg_span - (required_h - allowed_h))
+
+    floor_cap = 0.225 * cg_span
+    floor_hi = floor_min + 0.85 * max(floor_cap - floor_min, 0.0)
+    rf_floor = _lerp(floor_min, max(floor_min, floor_hi), c["cgroove_floor_radius_fraction"])
+
+    params = {
+        "front_cgroove_radial_pos": float(cg_pos),
+        "front_cgroove_radial_span": float(cg_span),
+        "front_cgroove_entry_radius": float(rf_entry),
+        "front_cgroove_floor_radius": float(rf_floor),
+        "front_cgroove_exit_radius": float(rf_exit),
+    }
+    for key in COUPLED_CGROOVE_PARAMETERS:
+        lo = float(NOMINAL_RIM_FEATURE_MM[key] + MIN_RIM_FEATURE_OFFSET_MM[key])
+        hi = float(NOMINAL_RIM_FEATURE_MM[key] + MAX_RIM_FEATURE_OFFSET_MM[key])
+        params[key] = float(np.clip(params[key], lo, hi))
+
+    required_h_after_clip = (
+        params["front_cgroove_radial_pos"]
+        + params["front_cgroove_entry_radius"]
+        + params["front_cgroove_radial_span"]
+        + params["front_cgroove_exit_radius"]
+        + rf_root
+        + 0.3
+    )
+    if required_h_after_clip > h_arm - 0.05:
+        overflow = required_h_after_clip - (h_arm - 0.05)
+        params["front_cgroove_radial_span"] = max(
+            float(NOMINAL_RIM_FEATURE_MM["front_cgroove_radial_span"] + MIN_RIM_FEATURE_OFFSET_MM["front_cgroove_radial_span"]),
+            params["front_cgroove_radial_span"] - overflow,
+        )
+
+    meta = {
+        "effective_h_arm_mm": float(h_arm),
+        "effective_neck_thickness_mm": float(neck_t),
+        "effective_root_radius_mm": float(rf_root),
+        "clearance_mm": float(clearance_mm),
+        "position_max_phys_mm": float(pos_max_phys),
+        "entry_cap_mm": float(entry_cap),
+        "span_cap_budget_mm": float(span_cap_budget),
+        "exit_cap_mm": float(exit_cap),
+        "floor_cap_mm": float(floor_cap),
+    }
+    return params, meta

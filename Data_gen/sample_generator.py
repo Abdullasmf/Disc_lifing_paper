@@ -7,7 +7,9 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from .config import (
+    clip_cgroove_controls_to_bounds,
     CYCLE_SPEED_FACTORS,
+    map_cgroove_controls_to_parameters,
     RIM_FEATURE_PARAMETERS,
     REPRESENTATIONS,
     SUBZONE_NAME_TO_ID,
@@ -93,6 +95,7 @@ def generate_sample(
     include_debug_fields: bool = False,
     lifing_mode: str = "zonal",
     rim_feature_offsets: dict[str, float] | None = None,
+    cgroove_sampling_controls: dict[str, float] | None = None,
 ) -> dict:
     """Generate one complete deterministic sample from one offset vector.
 
@@ -125,8 +128,20 @@ def generate_sample(
     # Rim-feature parameters: C-groove + rear drive arm.
     clipped_rim_feature_offsets = clip_rim_feature_offsets_to_bounds(rim_feature_offsets or {})
     raw_rim_feature_params = resolve_rim_feature_parameters(clipped_rim_feature_offsets)
+    cgroove_controls_used = None
+    cgroove_mapping_metadata = None
+    if cgroove_sampling_controls is not None:
+        cgroove_controls_used = clip_cgroove_controls_to_bounds(cgroove_sampling_controls)
+        coupled_cgroove, cgroove_mapping_metadata = map_cgroove_controls_to_parameters(
+            controls=cgroove_controls_used,
+            resolved_rim=raw_rim_feature_params,
+            t_rim=actual_params["rim_thickness"],
+        )
+        raw_rim_feature_params = {**raw_rim_feature_params, **coupled_cgroove}
+
+    resolved_rim_feature_params = {k: float(v) for k, v in raw_rim_feature_params.items()}
     actual_rim_feature_params = sanitize_rim_feature_parameters(
-        raw_rim_feature_params,
+        resolved_rim_feature_params,
         t_rim=actual_params["rim_thickness"],
         bore_thickness=actual_params["bore_thickness"],
     )
@@ -251,6 +266,7 @@ def generate_sample(
             "param_offsets": {k: float(v) for k, v in clipped_offsets.items()},
             "geometry_parameters_actual": {k: float(v) for k, v in actual_params.items()},
             "rim_feature_offsets": {k: float(v) for k, v in clipped_rim_feature_offsets.items()},
+            "rim_feature_parameters_resolved_pre_sanitization": resolved_rim_feature_params,
             "rim_feature_parameters_actual": {k: float(v) for k, v in actual_rim_feature_params.items()},
             "representation": representation,
             "node_coords_mm": edge_points,
@@ -297,6 +313,7 @@ def generate_sample(
             "param_offsets": {k: float(v) for k, v in clipped_offsets.items()},
             "geometry_parameters_actual": {k: float(v) for k, v in actual_params.items()},
             "rim_feature_offsets": {k: float(v) for k, v in clipped_rim_feature_offsets.items()},
+            "rim_feature_parameters_resolved_pre_sanitization": resolved_rim_feature_params,
             "rim_feature_parameters_actual": {k: float(v) for k, v in actual_rim_feature_params.items()},
             "representation": representation,
             "node_coords_mm": node_coords,
@@ -322,6 +339,7 @@ def generate_sample(
             "param_offsets": {k: float(v) for k, v in clipped_offsets.items()},
             "geometry_parameters_actual": {k: float(v) for k, v in actual_params.items()},
             "rim_feature_offsets": {k: float(v) for k, v in clipped_rim_feature_offsets.items()},
+            "rim_feature_parameters_resolved_pre_sanitization": resolved_rim_feature_params,
             "rim_feature_parameters_actual": {k: float(v) for k, v in actual_rim_feature_params.items()},
             "representation": representation,
             "node_coords_mm": mesh.nodes,
@@ -341,6 +359,10 @@ def generate_sample(
 
     out["seed"] = int(seed)
     out["lifing_mode"] = lifing_mode
+    if cgroove_controls_used is not None:
+        out["cgroove_sampling_controls_requested"] = {k: float(v) for k, v in cgroove_controls_used.items()}
+    if cgroove_mapping_metadata is not None:
+        out["cgroove_control_mapping_metadata"] = {k: float(v) for k, v in cgroove_mapping_metadata.items()}
     out["triangles"] = mesh.triangles.astype(np.int32)
     out["blade_equiv_force_N"] = float(blade_equiv_force_n(OMEGA_REF_RAD_S))
     out["blade_equiv_load_description"] = "annular_blade_mass_centrifugal_surrogate_rim_top_ligament_arm_land_face"
