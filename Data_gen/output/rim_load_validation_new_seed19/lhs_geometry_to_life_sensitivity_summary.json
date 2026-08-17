@@ -4,11 +4,11 @@
     "bore_radius_inner": 0.14710373080515993,
     "bore_thickness": 0.4854264235101269,
     "front_cgroove_axial_depth": 1.458025672060681,
-    "front_cgroove_entry_radius": 0.7277861386216302,
-    "front_cgroove_exit_radius": 0.5321223026336658,
-    "front_cgroove_floor_radius": 0.21553874461763733,
-    "front_cgroove_radial_pos": 1.8472679202008182,
-    "front_cgroove_radial_span": 1.4156689276847247,
+    "front_cgroove_entry_radius": 0.19999999999999996,
+    "front_cgroove_exit_radius": 0.19999999999999996,
+    "front_cgroove_floor_radius": 0.0105599841716284,
+    "front_cgroove_radial_pos": 0.20954848873898252,
+    "front_cgroove_radial_span": 0.7155759805215243,
     "lower_fillet_radius": 0.0974548097689718,
     "lower_transition_height": 0.38550146872647284,
     "rear_arm_axial_projection": 1.6862288729132602,
@@ -24,10 +24,10 @@
     "web_thickness": 0.3884660430572193
   },
   "delta_loglife_min_distribution": {
-    "median": -3.29738370298018,
-    "min": -5.9349159205784145,
-    "p05": -4.948369600386502,
-    "p95": -1.718682865692051
+    "median": -3.202505410443539,
+    "min": -5.592141261417332,
+    "p05": -5.130363765234378,
+    "p95": -2.082655238422786
   },
   "landmarks_reported": [
     "rim_core_reference",
@@ -41,117 +41,117 @@
     "rear_arm_outer_corner"
   ],
   "num_samples": 50,
-  "num_valid_samples": 42,
+  "num_valid_samples": 50,
   "sensitivity_correlation_ranked": [
     {
-      "p_value": 0.001634709869633564,
-      "parameter": "rear_arm_axial_projection",
-      "spearman_rho_vs_delta_loglife_min": -0.47119358236771747
-    },
-    {
-      "p_value": 0.004030813810419525,
+      "p_value": 5.09135929216856e-09,
       "parameter": "front_cgroove_axial_depth",
-      "spearman_rho_vs_delta_loglife_min": -0.4345677011587392
+      "spearman_rho_vs_delta_loglife_min": -0.7159183673469388
     },
     {
-      "p_value": 0.08309391853123564,
-      "parameter": "front_cgroove_radial_span",
-      "spearman_rho_vs_delta_loglife_min": -0.2705615428247306
+      "p_value": 0.0012104252402669053,
+      "parameter": "rear_arm_axial_projection",
+      "spearman_rho_vs_delta_loglife_min": -0.4448019207683073
     },
     {
-      "p_value": 0.0846386378813496,
-      "parameter": "lower_transition_height",
-      "spearman_rho_vs_delta_loglife_min": 0.26926505145450125
-    },
-    {
-      "p_value": 0.09063110407986855,
-      "parameter": "front_cgroove_radial_pos",
-      "spearman_rho_vs_delta_loglife_min": 0.2644032088161413
-    },
-    {
-      "p_value": 0.13818016105329511,
-      "parameter": "web_height",
-      "spearman_rho_vs_delta_loglife_min": -0.23263917024552308
-    },
-    {
-      "p_value": 0.21774395845395525,
-      "parameter": "upper_transition_height",
-      "spearman_rho_vs_delta_loglife_min": -0.19423061340247955
-    },
-    {
-      "p_value": 0.276449730754617,
-      "parameter": "web_thickness",
-      "spearman_rho_vs_delta_loglife_min": 0.17186613726602384
-    },
-    {
-      "p_value": 0.3806657572180311,
-      "parameter": "rear_arm_radial_height",
-      "spearman_rho_vs_delta_loglife_min": -0.13880560732517624
-    },
-    {
-      "p_value": 0.4702896274267913,
-      "parameter": "upper_fillet_radius",
-      "spearman_rho_vs_delta_loglife_min": -0.11449639413337655
-    },
-    {
-      "p_value": 0.5189716404939404,
-      "parameter": "bore_thickness",
-      "spearman_rho_vs_delta_loglife_min": 0.1023417875374767
-    },
-    {
-      "p_value": 0.6276350964661108,
-      "parameter": "front_cgroove_entry_radius",
-      "spearman_rho_vs_delta_loglife_min": -0.07706020581800502
-    },
-    {
-      "p_value": 0.6356392226862326,
-      "parameter": "bore_radius_inner",
-      "spearman_rho_vs_delta_loglife_min": 0.07527753018393972
-    },
-    {
-      "p_value": 0.6584151656296703,
-      "parameter": "rear_arm_outer_corner_radius",
-      "spearman_rho_vs_delta_loglife_min": 0.07025362612430111
-    },
-    {
-      "p_value": 0.6815001516863526,
+      "p_value": 0.16520344960614303,
       "parameter": "rim_thickness",
-      "spearman_rho_vs_delta_loglife_min": 0.06522972206466252
+      "spearman_rho_vs_delta_loglife_min": -0.19932773109243698
     },
     {
-      "p_value": 0.6875054860456746,
+      "p_value": 0.16582789373281348,
+      "parameter": "web_thickness",
+      "spearman_rho_vs_delta_loglife_min": 0.19903961584633853
+    },
+    {
+      "p_value": 0.17045976104296842,
       "parameter": "rim_height",
-      "spearman_rho_vs_delta_loglife_min": 0.0639332306944332
+      "spearman_rho_vs_delta_loglife_min": 0.19692677070828332
     },
     {
-      "p_value": 0.7124749131223843,
-      "parameter": "rear_arm_neck_thickness",
-      "spearman_rho_vs_delta_loglife_min": 0.058585203792237264
-    },
-    {
-      "p_value": 0.7346662703585908,
+      "p_value": 0.17922766458999262,
       "parameter": "front_cgroove_floor_radius",
-      "spearman_rho_vs_delta_loglife_min": 0.05388542257515598
+      "spearman_rho_vs_delta_loglife_min": 0.19303855870238748
     },
     {
-      "p_value": 0.8405254495614819,
-      "parameter": "lower_fillet_radius",
-      "spearman_rho_vs_delta_loglife_min": 0.03200713070253627
+      "p_value": 0.2251119689894432,
+      "parameter": "bore_thickness",
+      "spearman_rho_vs_delta_loglife_min": 0.17464585834333732
     },
     {
-      "p_value": 0.9378881509865928,
-      "parameter": "bore_height",
-      "spearman_rho_vs_delta_loglife_min": -0.012397698727817843
-    },
-    {
-      "p_value": 0.9654701967757772,
-      "parameter": "rear_arm_root_radius",
-      "spearman_rho_vs_delta_loglife_min": -0.006887610404343247
-    },
-    {
-      "p_value": 0.9662821917161817,
+      "p_value": 0.3186036716560857,
       "parameter": "front_cgroove_exit_radius",
-      "spearman_rho_vs_delta_loglife_min": -0.006725548983064582
+      "spearman_rho_vs_delta_loglife_min": 0.1439485305216037
+    },
+    {
+      "p_value": 0.4749349791129632,
+      "parameter": "bore_radius_inner",
+      "spearman_rho_vs_delta_loglife_min": 0.10338535414165667
+    },
+    {
+      "p_value": 0.4753475552493742,
+      "parameter": "upper_transition_height",
+      "spearman_rho_vs_delta_loglife_min": -0.1032893157262905
+    },
+    {
+      "p_value": 0.4794837696605122,
+      "parameter": "lower_transition_height",
+      "spearman_rho_vs_delta_loglife_min": 0.10232893157262904
+    },
+    {
+      "p_value": 0.5498782935515881,
+      "parameter": "front_cgroove_radial_pos",
+      "spearman_rho_vs_delta_loglife_min": 0.08659294072292348
+    },
+    {
+      "p_value": 0.5873910280279692,
+      "parameter": "upper_fillet_radius",
+      "spearman_rho_vs_delta_loglife_min": 0.07860744297719087
+    },
+    {
+      "p_value": 0.5956601487472963,
+      "parameter": "rear_arm_outer_corner_radius",
+      "spearman_rho_vs_delta_loglife_min": -0.07687875150060022
+    },
+    {
+      "p_value": 0.6334899031407718,
+      "parameter": "web_height",
+      "spearman_rho_vs_delta_loglife_min": -0.06909963985594238
+    },
+    {
+      "p_value": 0.6464762399897379,
+      "parameter": "front_cgroove_radial_span",
+      "spearman_rho_vs_delta_loglife_min": -0.0664742292273666
+    },
+    {
+      "p_value": 0.6640572139268148,
+      "parameter": "rear_arm_root_radius",
+      "spearman_rho_vs_delta_loglife_min": 0.062953181272509
+    },
+    {
+      "p_value": 0.7644369371593015,
+      "parameter": "rear_arm_neck_thickness",
+      "spearman_rho_vs_delta_loglife_min": -0.04345738295318128
+    },
+    {
+      "p_value": 0.8046715080721824,
+      "parameter": "rear_arm_radial_height",
+      "spearman_rho_vs_delta_loglife_min": 0.03587034813925571
+    },
+    {
+      "p_value": 0.8195738612852521,
+      "parameter": "bore_height",
+      "spearman_rho_vs_delta_loglife_min": 0.03308523409363745
+    },
+    {
+      "p_value": 0.9222199650398092,
+      "parameter": "lower_fillet_radius",
+      "spearman_rho_vs_delta_loglife_min": 0.014165666266506602
+    },
+    {
+      "p_value": 0.9323445033923579,
+      "parameter": "front_cgroove_entry_radius",
+      "spearman_rho_vs_delta_loglife_min": -0.012317118448490545
     }
   ]
 }
