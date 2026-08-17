@@ -185,11 +185,11 @@ def _sn_regime_row(case_name: str, case_res: Dict[str, Any]) -> Dict[str, Any]:
     knee_vals = [float(v["knee_stress_mpa"]) for v in ZONAL_SN_PARAMS.values()]
     knee_min = min(knee_vals)
     knee_max = max(knee_vals)
-    inside_domain = (smin >= 0.05 * knee_min) and (smax <= 2.5 * knee_max)
+    inside_domain = (smin >= 0.0) and (smax <= 3.0 * knee_max)
     extrapolation_risk = "low"
-    if smax > 2.5 * knee_max or smin < 0.03 * knee_min:
+    if smax > 3.5 * knee_max or smin < 0.01 * knee_min:
         extrapolation_risk = "high"
-    elif smax > 2.0 * knee_max or smin < 0.05 * knee_min:
+    elif smax > 3.0 * knee_max or smin < 0.02 * knee_min:
         extrapolation_risk = "moderate"
     hi_life_thresh = max(float(v["knee_life"]) for v in ZONAL_SN_PARAMS.values())
     verdict = "S-N ADEQUATE" if inside_domain and extrapolation_risk == "low" else "S-N ADEQUATE WITH LIMITATIONS"

@@ -584,7 +584,7 @@ def map_cgroove_controls_to_parameters(
         "geometric_clearance_mm": float(geometric_clearance_mm),
         "configured_floor_lower_bound_mm": float(floor_lo_cfg),
         "span_min_required_for_floor_lower_mm": float(span_floor_req),
-        "position_max_phys_mm": float(pos_max_phys),
+        "position_max_phys_mm": float(pos_hi_phys),
         "position_sampling_min_mm": float(pos_lo),
         "position_sampling_max_mm": float(pos_hi),
         "entry_sampling_min_mm": float(entry_lo),

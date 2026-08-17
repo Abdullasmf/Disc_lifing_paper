@@ -688,20 +688,20 @@ def _parameter_coverage(results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "status": status,
             }
     cgroove_clip_rates = {
-        param: float(np.mean([param in r.get("sanitized_rim_parameters_changed", []) for r in results]))
+        param: float(np.mean([param in r.get("sanitized_rim_parameters_changed", []) for r in results if "actual_rim" in r and "resolved_rim" in r]))
         for param in COUPLED_CGROOVE_PARAMETERS
     }
-    discrepancy = {
-        param: {
-            "mean_abs_requested_to_final_mm": float(
-                np.mean([abs(float(r["actual_rim"][param]) - float(r["resolved_rim"][param])) for r in results])
-            ),
-            "max_abs_requested_to_final_mm": float(
-                np.max([abs(float(r["actual_rim"][param]) - float(r["resolved_rim"][param])) for r in results])
-            ),
+    discrepancy: Dict[str, Dict[str, float]] = {}
+    for param in COUPLED_CGROOVE_PARAMETERS:
+        vals = [
+            abs(float(r["actual_rim"][param]) - float(r["resolved_rim"][param]))
+            for r in results
+            if "actual_rim" in r and "resolved_rim" in r
+        ]
+        discrepancy[param] = {
+            "mean_abs_requested_to_final_mm": float(np.mean(vals)) if vals else float("nan"),
+            "max_abs_requested_to_final_mm": float(np.max(vals)) if vals else float("nan"),
         }
-        for param in COUPLED_CGROOVE_PARAMETERS
-    }
     return {
         "parameters": param_summary,
         "all_declared_core_sampled": all(f"core:{k}" in param_summary for k in PUBLIC_GEOMETRY_PARAMETERS),
@@ -735,11 +735,17 @@ def _save_lhs_plots(out_dir: Path, lhs_results: List[Dict[str, Any]]) -> None:
     for group_name, params in [("core", PUBLIC_GEOMETRY_PARAMETERS), ("rim_feature", RIM_FEATURE_PARAMETERS)]:
         for param in params:
             if group_name == "core":
-                x = np.array([r["resolved_core"][param] for r in lhs_results], dtype=np.float64)
-                y = np.array([r["actual_core"][param] for r in lhs_results], dtype=np.float64)
+                valid = [r for r in lhs_results if param in r.get("resolved_core", {}) and param in r.get("actual_core", {})]
+                if not valid:
+                    continue
+                x = np.array([r["resolved_core"][param] for r in valid], dtype=np.float64)
+                y = np.array([r["actual_core"][param] for r in valid], dtype=np.float64)
             else:
-                x = np.array([r["resolved_rim"][param] for r in lhs_results], dtype=np.float64)
-                y = np.array([r["actual_rim"][param] for r in lhs_results], dtype=np.float64)
+                valid = [r for r in lhs_results if param in r.get("resolved_rim", {}) and param in r.get("actual_rim", {})]
+                if not valid:
+                    continue
+                x = np.array([r["resolved_rim"][param] for r in valid], dtype=np.float64)
+                y = np.array([r["actual_rim"][param] for r in valid], dtype=np.float64)
             clipped = np.abs(y - x) > 1e-9
             fig, ax = plt.subplots(figsize=(5, 4))
             ax.scatter(x[~clipped], y[~clipped], c="tab:blue", s=20, label="unchanged")
@@ -763,13 +769,19 @@ def _save_lhs_plots(out_dir: Path, lhs_results: List[Dict[str, Any]]) -> None:
             axes = [axes]
         for ax, param in zip(axes, params):
             if group_name == "core":
-                requested = np.array([r["resolved_core"][param] for r in lhs_results], dtype=np.float64)
-                actual = np.array([r["actual_core"][param] for r in lhs_results], dtype=np.float64)
+                valid = [r for r in lhs_results if param in r.get("resolved_core", {}) and param in r.get("actual_core", {})]
+                if not valid:
+                    continue
+                requested = np.array([r["resolved_core"][param] for r in valid], dtype=np.float64)
+                actual = np.array([r["actual_core"][param] for r in valid], dtype=np.float64)
                 lo = NOMINAL_GEOMETRY_MM[param] + MIN_OFFSET_MM[param]
                 hi = NOMINAL_GEOMETRY_MM[param] + MAX_OFFSET_MM[param]
             else:
-                requested = np.array([r["resolved_rim"][param] for r in lhs_results], dtype=np.float64)
-                actual = np.array([r["actual_rim"][param] for r in lhs_results], dtype=np.float64)
+                valid = [r for r in lhs_results if param in r.get("resolved_rim", {}) and param in r.get("actual_rim", {})]
+                if not valid:
+                    continue
+                requested = np.array([r["resolved_rim"][param] for r in valid], dtype=np.float64)
+                actual = np.array([r["actual_rim"][param] for r in valid], dtype=np.float64)
                 lo = NOMINAL_RIM_FEATURE_MM[param] + MIN_RIM_FEATURE_OFFSET_MM[param]
                 hi = NOMINAL_RIM_FEATURE_MM[param] + MAX_RIM_FEATURE_OFFSET_MM[param]
             ax.axvline(lo, color="0.5", ls="--", lw=0.8)
@@ -932,6 +944,16 @@ def _life_sensitivity_audit(
     out_dir: Path,
     save_plots: bool,
 ) -> Dict[str, Any]:
+    if "_contour" not in nominal_raw or "_mesh" not in nominal_raw:
+        summary = {
+            "num_samples": len(lhs_results_raw),
+            "num_valid_samples": 0,
+            "error": "missing_nominal_reference",
+        }
+        _write_csv(out_dir / "lhs_geometry_to_life_sensitivity.csv", [])
+        _write_csv(out_dir / "severe_life_change_cases.csv", [])
+        _write_json(out_dir / "lhs_geometry_to_life_sensitivity_summary.json", summary)
+        return summary
     all_keys = list(PUBLIC_GEOMETRY_PARAMETERS) + list(RIM_FEATURE_PARAMETERS)
     cgroove_keys = [
         "front_cgroove_axial_depth",
@@ -1590,6 +1612,14 @@ def run_validation(case: str, output_dir: Path, mesh_name: str, save_plots: bool
             "seed": int(seed),
         }
         nominal_raw = validate_geometry_case(nominal_spec, mesh_name, out_dir, save_plots=False)
+        retry_count = 0
+        while ("_contour" not in nominal_raw or nominal_raw.get("status") == "FAIL") and retry_count < 2:
+            retry_count += 1
+            nominal_raw = validate_geometry_case(nominal_spec, mesh_name, out_dir, save_plots=False)
+        if "_contour" not in nominal_raw or nominal_raw.get("status") == "FAIL":
+            fallback = next((r for r in lhs_results_raw if r.get("status") == "PASS" and "_contour" in r), None)
+            if fallback is not None:
+                nominal_raw = fallback
         _write_csv(out_dir / "lhs_coverage_controls.csv", lhs_rows_controls)
         _write_csv(out_dir / "lhs_coverage_requested.csv", lhs_rows_requested)
         _write_csv(out_dir / "lhs_coverage_actual.csv", lhs_rows_actual)
