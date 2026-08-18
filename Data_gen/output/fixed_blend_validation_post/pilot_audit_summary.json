@@ -1,0 +1,36 @@
+{
+  "sample_count": 100,
+  "representation": "edge",
+  "has_fixed_blend_provenance_attrs": true,
+  "has_required_root_tables": true,
+  "missing_required_sample_fields": 0,
+  "empty_node_count_samples": 0,
+  "bad_representation_shape_samples": 0,
+  "samples_with_nonfinite_stress": 0,
+  "samples_with_nonfinite_life": 0,
+  "samples_with_nonpositive_life": 0,
+  "samples_missing_new_blend_landmarks": 0,
+  "all_samples_have_cgroove_controls": true,
+  "all_samples_have_resolved_pre_sanitization": true,
+  "all_samples_have_actual_rim_params": true,
+  "worst_life_sample": {
+    "sample": "sample_000047",
+    "min_life": 13.231146443337053,
+    "min_loglife": 1.1215974762694272,
+    "min_stress": 1300.3094962709915,
+    "min_coord_mm": [
+      5.168297191039942,
+      42.052946001611964
+    ],
+    "zone_id": 1,
+    "subzone_id": 1
+  },
+  "rim_param_min_std": 0.07075194230497885,
+  "core_param_min_std": 0.05778462746850234,
+  "cgroove_controls_min_std": 0.2307353076707257,
+  "worst_life_distance_to_blends_mm": {
+    "bore_lower_rear_blend": 20.007150568048537,
+    "bore_lower_front_blend": 26.552697432513003,
+    "rear_arm_neck_rim_lower_blend": 65.27361249891368
+  }
+}

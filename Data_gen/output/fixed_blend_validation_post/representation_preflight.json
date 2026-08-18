@@ -1,0 +1,22 @@
+{
+  "sample_id": 47,
+  "seed": 7372311,
+  "same_requested_and_actual_geometry_across_representations": true,
+  "same_contour_points_across_representations": true,
+  "stress_identical_full_zonal_vs_full_uniform": true,
+  "edge_vs_full_nearest_stress_max_abs_diff_mpa": 0.0,
+  "edge_proximity_vs_full_interior_coord_max_diff_mm": 0.0,
+  "edge_proximity_vs_full_interior_stress_max_abs_diff_mpa": 0.0,
+  "edge_proximity_band_check_pass": true,
+  "edge_proximity_config_distance_mm": 2.0,
+  "edge_proximity_interior_count": 9224,
+  "edge_include_derivatives_feature_names": [
+    "tangent_x",
+    "tangent_r",
+    "curvature",
+    "curvature_gradient"
+  ],
+  "edge_without_derivatives_feature_col_count": 0,
+  "life_changes_with_lifing_mode": true,
+  "geometry_unchanged_between_lifing_modes": true
+}

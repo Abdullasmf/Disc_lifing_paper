@@ -89,6 +89,13 @@ MAX_OFFSET_MM = {
 REPRESENTATIONS = ("edge", "edge_proximity", "full")
 THICKNESS_ORDERING_GAP_MM = 0.5
 
+# Fixed baseline manufacturing-style contour blends (NOT sampled).
+FIXED_BASELINE_BLEND_RADIUS_MM = 0.8
+# Keep per-location aliases so future localized edits do not require call-site rewrites.
+FIXED_BASELINE_BORE_CORNER_BLEND_RADIUS_MM = FIXED_BASELINE_BLEND_RADIUS_MM
+FIXED_BASELINE_REAR_ARM_NECK_RIM_BLEND_RADIUS_MM = FIXED_BASELINE_BLEND_RADIUS_MM
+FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM = 1.5
+
 # ---------------------------------------------------------------------------
 # Sub-zone identifiers for fine-grained region labeling.
 # These refine the existing ZONE_NAME_TO_ID labels without replacing them.

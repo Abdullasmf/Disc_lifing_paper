@@ -34,6 +34,8 @@ from Data_gen.validate_rim_load_and_physics import (
 MESH_LANDMARKS = [
     "lower_transition",
     "upper_transition",
+    "bore_lower_rear_blend",
+    "bore_lower_front_blend",
     "rim_core_reference",
     "front_cgroove_entry",
     "front_cgroove_floor",
@@ -41,6 +43,7 @@ MESH_LANDMARKS = [
     "rear_arm_root",
     "rear_arm_neck",
     "rear_arm_outer_corner",
+    "rear_arm_neck_rim_lower_blend",
 ]
 
 

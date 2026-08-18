@@ -1,0 +1,137 @@
+{
+  "mesh": "medium",
+  "geometry": "high_feature",
+  "lc_edge": 0.5,
+  "lc_fillet": 0.3,
+  "n_nodes": 23815,
+  "n_elements": 46622,
+  "global_peak_stress_mpa": 1173.520522414489,
+  "global_min_life_cycles": 50.21412194436412,
+  "actual_rim_feature_params": {
+    "front_cgroove_axial_depth": 6.8,
+    "front_cgroove_radial_span": 3.95,
+    "front_cgroove_radial_pos": 1.15,
+    "front_cgroove_entry_radius": 0.9,
+    "front_cgroove_floor_radius": 0.88875,
+    "front_cgroove_exit_radius": 0.9,
+    "rear_arm_axial_projection": 8.4,
+    "rear_arm_radial_height": 8.3,
+    "rear_arm_neck_thickness": 4.2,
+    "rear_arm_root_radius": 1.1,
+    "rear_arm_outer_corner_radius": 1.1
+  },
+  "features": {
+    "bore_lower_rear_blend": {
+      "p90_stress_mpa": 653.4089193209694,
+      "max_stress_mpa": 657.4715861630451,
+      "median_life_cycles": 2072103.3217932153,
+      "min_life_cycles": 1532973.87213506,
+      "node_count": 51,
+      "neighbourhood_radius_mm": 1.5
+    },
+    "bore_lower_front_blend": {
+      "p90_stress_mpa": 488.9362949151064,
+      "max_stress_mpa": 504.4323799294052,
+      "median_life_cycles": 25075407.44484637,
+      "min_life_cycles": 15557061.652875632,
+      "node_count": 54,
+      "neighbourhood_radius_mm": 1.5
+    },
+    "front_cgroove_entry": {
+      "p90_stress_mpa": 141.0219207977452,
+      "max_stress_mpa": 153.4441380563636,
+      "median_life_cycles": 1021371542.7615443,
+      "min_life_cycles": 352390546.5622452,
+      "node_count": 95,
+      "neighbourhood_radius_mm": 2.0
+    },
+    "front_cgroove_floor": {
+      "p90_stress_mpa": 305.86298169444564,
+      "max_stress_mpa": 723.1008313469254,
+      "median_life_cycles": 58250077.73909123,
+      "min_life_cycles": 5222.443569164767,
+      "node_count": 143,
+      "neighbourhood_radius_mm": 2.0
+    },
+    "front_cgroove_exit": {
+      "p90_stress_mpa": 187.302200313432,
+      "max_stress_mpa": 192.52480523207598,
+      "median_life_cycles": 185449472.8777718,
+      "min_life_cycles": 142193153.61877587,
+      "node_count": 100,
+      "neighbourhood_radius_mm": 2.0
+    },
+    "ligament_reference": {
+      "p90_stress_mpa": 333.9242530760295,
+      "max_stress_mpa": 422.54843741809395,
+      "median_life_cycles": 14846690.865879146,
+      "min_life_cycles": 656889.7494857797,
+      "node_count": 258,
+      "neighbourhood_radius_mm": 3.0
+    },
+    "rear_arm_root": {
+      "p90_stress_mpa": 381.2772596507916,
+      "max_stress_mpa": 385.0389349118342,
+      "median_life_cycles": 1973094.0231475942,
+      "min_life_cycles": 1508289.3114823513,
+      "node_count": 55,
+      "neighbourhood_radius_mm": 1.5
+    },
+    "rear_arm_neck": {
+      "p90_stress_mpa": 441.482493862892,
+      "max_stress_mpa": 461.6033768142052,
+      "median_life_cycles": 989618.9637651081,
+      "min_life_cycles": 296529.8926222326,
+      "node_count": 193,
+      "neighbourhood_radius_mm": 1.5
+    },
+    "rear_arm_outer_corner": {
+      "p90_stress_mpa": 541.6752725232875,
+      "max_stress_mpa": 548.9017370616988,
+      "median_life_cycles": 93856.77521982873,
+      "min_life_cycles": 62395.13644375279,
+      "node_count": 77,
+      "neighbourhood_radius_mm": 1.5
+    },
+    "rear_arm_neck_rim_lower_blend": {
+      "p90_stress_mpa": 481.1899794165062,
+      "max_stress_mpa": 690.4957748691537,
+      "median_life_cycles": 1188238.4404445798,
+      "min_life_cycles": 7910.590662311523,
+      "node_count": 142,
+      "neighbourhood_radius_mm": 1.5
+    },
+    "rear_arm_load_face_centroid": {
+      "p90_stress_mpa": 569.4080634814131,
+      "max_stress_mpa": 582.8278070918259,
+      "median_life_cycles": 60331.56249703262,
+      "min_life_cycles": 36371.48619006742,
+      "node_count": 95,
+      "neighbourhood_radius_mm": 2.0
+    },
+    "rim_core_reference": {
+      "p90_stress_mpa": 351.49054795130223,
+      "max_stress_mpa": 369.6671802401169,
+      "median_life_cycles": 11034734.751367278,
+      "min_life_cycles": 2154485.1434666435,
+      "node_count": 816,
+      "neighbourhood_radius_mm": 4.0
+    },
+    "lower_transition_start": {
+      "p90_stress_mpa": 512.8645576768628,
+      "max_stress_mpa": 530.2635071498576,
+      "median_life_cycles": 12343036.971882956,
+      "min_life_cycles": 2622601.2390832175,
+      "node_count": 651,
+      "neighbourhood_radius_mm": 4.0
+    },
+    "upper_transition_start": {
+      "p90_stress_mpa": 462.2999738052718,
+      "max_stress_mpa": 538.6616137749905,
+      "median_life_cycles": 20376528.14803864,
+      "min_life_cycles": 399081.04488102923,
+      "node_count": 1288,
+      "neighbourhood_radius_mm": 4.0
+    }
+  }
+}
