@@ -28,6 +28,9 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from .config import (
+    FIXED_BASELINE_BLEND_RADIUS_MM,
+    FIXED_BASELINE_BORE_CORNER_BLEND_RADIUS_MM,
+    FIXED_BASELINE_REAR_ARM_NECK_RIM_BLEND_RADIUS_MM,
     REGION_NAME_TO_ID,
     RIM_FEATURE_PARAMETERS,
     SUBZONE_NAME_TO_ID,
@@ -254,6 +257,7 @@ def _build_outer_cap_cgroove_arm(
     t_rim: float,
     r5: float,
     fp: Dict[str, float],
+    rear_neck_rim_blend_radius_mm: float,
     n_per_seg: int = 15,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray]]:
     """Build the C-groove + annular drive-arm outer boundary.
@@ -294,6 +298,7 @@ def _build_outer_cap_cgroove_arm(
     rf_root = fp["rear_arm_root_radius"]     # used for root corners, body corners, front top
     rf_corner = fp["rear_arm_outer_corner_radius"]
     arm_proj = fp["rear_arm_axial_projection"]
+    rf_neck_rim = max(0.0, float(rear_neck_rim_blend_radius_mm))
 
     # Key x positions
     x_arm_end = x_rear + arm_proj
@@ -489,19 +494,41 @@ def _build_outer_cap_cgroove_arm(
 
     # ================================================================
     # ARM END FACE  (going DOWN at x = x_arm_end) — LOAD FACE
-    # From (x_arm_end, r_arm_top - rf_corner) to (x_arm_end, r5)
+    # From (x_arm_end, r_arm_top - rf_corner) to (x_arm_end, r5 + rf_neck_rim)
     # ================================================================
     r_end_top = r_arm_top - rf_corner
-    if r_end_top > r5 + 1e-6:
-        segs.append((_line_points(x_arm_end, r_end_top, x_arm_end, r5,
+    r_end_bot = r5 + rf_neck_rim
+    if r_end_top > r_end_bot + 1e-6:
+        segs.append((_line_points(x_arm_end, r_end_top, x_arm_end, r_end_bot,
                                   n_feat), sz["rear_arm_end_face"]))
 
     # ================================================================
-    # ARM BOTTOM  (going LEFT at r = r5, back to x_rear)
+    # ARM BOTTOM CORNER  (DOWN → LEFT, convex)
+    # At corner (x_arm_end, r5): DOWN→LEFT
+    # cx = x_arm_end - rf_neck_rim, cr = r5 + rf_neck_rim, 0→-90
     # ================================================================
-    if x_arm_end > x_rear + 1e-6:
-        segs.append((_line_points(x_arm_end, r5, x_rear, r5,
+    if rf_neck_rim > 1e-9:
+        segs.append((_arc_points(x_arm_end - rf_neck_rim, r5 + rf_neck_rim,
+                                 rf_neck_rim, 0.0, -90.0, n_arc), sz["rear_arm_corner"]))
+
+    # ================================================================
+    # ARM BOTTOM  (going LEFT at r = r5)
+    # From (x_arm_end - rf_neck_rim, r5) to (x_rear + rf_neck_rim, r5)
+    # ================================================================
+    x_bottom_start = x_arm_end - rf_neck_rim
+    x_bottom_end = x_rear + rf_neck_rim
+    if x_bottom_start > x_bottom_end + 1e-6:
+        segs.append((_line_points(x_bottom_start, r5, x_bottom_end, r5,
                                   max(8, n_per_seg)), sz["rim_main"]))
+
+    # ================================================================
+    # LOWER REAR ARM-NECK / RIM JUNCTION  (LEFT → DOWN, convex)
+    # At corner (x_rear, r5): LEFT→DOWN
+    # cx = x_rear + rf_neck_rim, cr = r5 - rf_neck_rim, 90→180
+    # ================================================================
+    if rf_neck_rim > 1e-9:
+        segs.append((_arc_points(x_rear + rf_neck_rim, r5 - rf_neck_rim,
+                                 rf_neck_rim, 90.0, 180.0, n_arc), sz["rear_arm_neck"]))
 
     points = np.vstack([s[0] for s in segs]).astype(np.float64)
     subzone = np.concatenate([np.full(s[0].shape[0], s[1], dtype=np.int32) for s in segs])
@@ -518,6 +545,13 @@ def _build_outer_cap_cgroove_arm(
         "rear_arm_root":              np.array([x_rear, r_arm_top - 0.5*rf_root], dtype=np.float64),
         "rear_arm_neck":              np.array([x_rear, 0.5*(r5 + r_neck_top)], dtype=np.float64),
         "rear_arm_outer_corner":      np.array([x_arm_end - 0.5*rf_corner, r_arm_top - 0.5*rf_corner], dtype=np.float64),
+        "rear_arm_neck_rim_lower_blend": np.array(
+            [
+                x_rear + rf_neck_rim - 0.5 * rf_neck_rim * np.sqrt(2.0),
+                r5 - rf_neck_rim + 0.5 * rf_neck_rim * np.sqrt(2.0),
+            ],
+            dtype=np.float64,
+        ),
         "rear_arm_load_face_centroid":np.array([x_arm_end, r_load_face_mid], dtype=np.float64),
         "rim_core_reference":         np.array([x_rear, r5], dtype=np.float64),
         # Blade traction geometry: rim top (ligament + arm land) at r = r_arm_top.
@@ -630,8 +664,21 @@ def build_disc_contour(
     radial_breaks = radial_stations_from_params(params)
     r0, r1, r2, r3, r4, r5 = [float(v) for v in radial_breaks]
 
-    front_r = np.linspace(r0, r5, points_per_side, endpoint=False)
-    rear_r = np.linspace(r5, r0, points_per_side, endpoint=False)
+    bore_blend_radius = float(min(
+        FIXED_BASELINE_BORE_CORNER_BLEND_RADIUS_MM,
+        0.45 * params["bore_height"],
+        0.45 * params["bore_thickness"],
+    ))
+    rear_neck_rim_blend_radius = 0.0
+    if rim_feature_params is not None:
+        rear_neck_rim_blend_radius = float(min(
+            FIXED_BASELINE_REAR_ARM_NECK_RIM_BLEND_RADIUS_MM,
+            0.45 * params["rim_thickness"],
+            0.45 * params["rim_height"],
+        ))
+
+    front_r = np.linspace(r0 + bore_blend_radius, r5, points_per_side, endpoint=False)
+    rear_r = np.linspace(r5 - rear_neck_rim_blend_radius, r0 + bore_blend_radius, points_per_side, endpoint=False)
 
     front_t = _thickness_profile(front_r, params, radial_breaks)
     rear_t = _thickness_profile(rear_r, params, radial_breaks)
@@ -650,7 +697,10 @@ def build_disc_contour(
 
     if rim_feature_params is not None:
         outer_cap_pts, outer_cap_subzone, rim_feature_points = _build_outer_cap_cgroove_arm(
-            t_rim=t_rim, r5=r5, fp=rim_feature_params
+            t_rim=t_rim,
+            r5=r5,
+            fp=rim_feature_params,
+            rear_neck_rim_blend_radius_mm=rear_neck_rim_blend_radius,
         )
     else:
         outer_cap_pts = np.column_stack([
@@ -660,24 +710,48 @@ def build_disc_contour(
         outer_cap_subzone = np.full(outer_cap_pts.shape[0], SUBZONE_NAME_TO_ID["rim_main"], dtype=np.int32)
         rim_feature_points = {}
 
-    inner_cap = np.column_stack([
-        np.linspace(+0.5 * params["bore_thickness"], -0.5 * params["bore_thickness"], 20, endpoint=False),
-        np.full(20, r0, dtype=np.float64),
-    ])
+    bore_t = float(params["bore_thickness"])
+    x_bore_front = -0.5 * bore_t
+    x_bore_rear = +0.5 * bore_t
+    n_corner = 10
+    rear_bore_corner = _arc_points(
+        x_bore_rear - bore_blend_radius,
+        r0 + bore_blend_radius,
+        bore_blend_radius,
+        0.0,
+        -90.0,
+        n_corner,
+    )
+    inner_cap = _line_points(
+        x_bore_rear - bore_blend_radius,
+        r0,
+        x_bore_front + bore_blend_radius,
+        r0,
+        20,
+    )
+    front_bore_corner = _arc_points(
+        x_bore_front + bore_blend_radius,
+        r0 + bore_blend_radius,
+        bore_blend_radius,
+        270.0,
+        180.0,
+        n_corner,
+    )
+    inner_cap_with_blends = np.vstack([rear_bore_corner, inner_cap, front_bore_corner])
 
-    contour_points = np.vstack([front_points, outer_cap_pts, rear_points, inner_cap])
+    contour_points = np.vstack([front_points, outer_cap_pts, rear_points, inner_cap_with_blends])
 
     zone_ids = np.concatenate([
         front_zone,
         np.full(outer_cap_pts.shape[0], ZONE_NAME_TO_ID["rim"], dtype=np.int32),
         rear_zone,
-        np.full(inner_cap.shape[0], ZONE_NAME_TO_ID["bore"], dtype=np.int32),
+        np.full(inner_cap_with_blends.shape[0], ZONE_NAME_TO_ID["bore"], dtype=np.int32),
     ])
     region_ids  = _region_from_zone(zone_ids)
 
     front_subzone = _subzone_by_zone(front_zone)
     rear_subzone  = _subzone_by_zone(rear_zone)
-    inner_cap_subzone = np.full(inner_cap.shape[0], SUBZONE_NAME_TO_ID["bore"], dtype=np.int32)
+    inner_cap_subzone = np.full(inner_cap_with_blends.shape[0], SUBZONE_NAME_TO_ID["bore"], dtype=np.int32)
     subzone_ids = np.concatenate([
         front_subzone, outer_cap_subzone, rear_subzone, inner_cap_subzone,
     ]).astype(np.int32)
@@ -698,6 +772,8 @@ def build_disc_contour(
         "r_outer":                np.array([r5], dtype=np.float64),
         "r_arm_outer":            np.array([r_arm_outer], dtype=np.float64),
         "r_step_outer":           np.array([r_arm_outer], dtype=np.float64),
+        "bore_lower_rear_blend":  np.array([x_bore_rear - 0.5 * bore_blend_radius, r0 + 0.5 * bore_blend_radius], dtype=np.float64),
+        "bore_lower_front_blend": np.array([x_bore_front + 0.5 * bore_blend_radius, r0 + 0.5 * bore_blend_radius], dtype=np.float64),
     }
     landmarks_mm.update(rim_feature_points)
 
@@ -717,6 +793,9 @@ def build_disc_contour(
             ZONE_NAME_TO_ID["rim"],
         ], dtype=np.int32),
         "has_rim_features": np.array([rim_feature_params is not None], dtype=bool),
+        "fixed_baseline_bore_corner_blend_radius_mm": np.array([bore_blend_radius], dtype=np.float64),
+        "fixed_baseline_rear_arm_neck_rim_blend_radius_mm": np.array([rear_neck_rim_blend_radius], dtype=np.float64),
+        "fixed_baseline_blend_radius_mm": np.array([FIXED_BASELINE_BLEND_RADIUS_MM], dtype=np.float64),
     }
     if rim_feature_params is not None:
         x_front = -0.5 * t_rim

@@ -1,0 +1,40 @@
+{
+  "nominal": {
+    "pre_medium_peak": 1152.9700508203343,
+    "post_medium_peak": 1155.5350766629588,
+    "peak_rel_change": 0.0022247115966277085,
+    "pre_medium_min_loglife": 1.8005704324205707,
+    "post_medium_min_loglife": 1.7880240508935705,
+    "min_loglife_delta": -0.012546381527000161,
+    "mesh_peak_rel_change_post": 0.034621335543584784,
+    "mesh_lower_transition_p90_rel_change_post": 0.0006858576467987459,
+    "mesh_median_loglife_delta_post": -0.10523726298315061,
+    "governing_medium": [
+      "lower_transition",
+      "lower_transition_end"
+    ],
+    "governing_fine": [
+      "lower_transition",
+      "lower_transition_end"
+    ]
+  },
+  "severe_sample_000047": {
+    "pre_medium_peak": 1274.3568596889068,
+    "post_medium_peak": 1268.706612897615,
+    "peak_rel_change": -0.004433802626268296,
+    "pre_medium_min_loglife": 1.2354212021074495,
+    "post_medium_min_loglife": 1.2605093431017222,
+    "min_loglife_delta": 0.0250881409942727,
+    "mesh_peak_rel_change_post": 0.0518909536835493,
+    "mesh_lower_transition_p90_rel_change_post": 0.002101994415558197,
+    "mesh_median_loglife_delta_post": -0.09204806892450712,
+    "governing_medium": [
+      "lower_transition",
+      "lower_transition_end"
+    ],
+    "governing_fine": [
+      "lower_transition",
+      "lower_transition_end"
+    ]
+  }
+}

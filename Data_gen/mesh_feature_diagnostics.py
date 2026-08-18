@@ -35,6 +35,7 @@ if str(_repo_root) not in sys.path:
 import Data_gen.mesh_ops as _mesh_ops  # imported before patching so we can patch constants
 
 from Data_gen.config import (
+    FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM,
     NOMINAL_GEOMETRY_MM,
     NOMINAL_RIM_FEATURE_MM,
     SUBZONE_NAME_TO_ID,
@@ -97,6 +98,8 @@ GEOMETRY_PRESETS: Dict[str, tuple] = {
 # stress levels and inflates p90 estimates in coarser meshes.
 # ---------------------------------------------------------------------------
 FEATURE_NEIGHBOURHOOD_MM: Dict[str, float] = {
+    "bore_lower_rear_blend":          FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM,
+    "bore_lower_front_blend":         FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM,
     "front_cgroove_entry":          2.0,
     "front_cgroove_floor":          2.0,
     "front_cgroove_exit":           2.0,
@@ -104,6 +107,7 @@ FEATURE_NEIGHBOURHOOD_MM: Dict[str, float] = {
     "rear_arm_root":                1.5,
     "rear_arm_neck":                1.5,
     "rear_arm_outer_corner":        1.5,
+    "rear_arm_neck_rim_lower_blend": FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM,
     "rear_arm_load_face_centroid":  2.0,
     "rim_core_reference":           4.0,
     "lower_transition_start":       4.0,

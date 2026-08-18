@@ -26,6 +26,7 @@ from Data_gen.config import (
     COUPLED_CGROOVE_PARAMETERS,
     CYCLE_PHASES,
     CYCLE_SPEED_FACTORS,
+    FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM,
     MAX_CGROOVE_CONTROL,
     MAX_OFFSET_MM,
     MAX_RIM_FEATURE_OFFSET_MM,
@@ -73,12 +74,15 @@ LANDMARK_NEIGHBOURHOODS_MM = {
     "rim_core_reference": 4.0,
     "lower_transition": 4.0,
     "upper_transition": 4.0,
+    "bore_lower_rear_blend": FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM,
+    "bore_lower_front_blend": FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM,
     "front_cgroove_entry": 2.0,
     "front_cgroove_floor": 2.0,
     "front_cgroove_exit": 2.0,
     "rear_arm_root": 1.5,
     "rear_arm_neck": 1.5,
     "rear_arm_outer_corner": 1.5,
+    "rear_arm_neck_rim_lower_blend": FIXED_BASELINE_BLEND_LANDMARK_NEIGHBOURHOOD_MM,
 }
 PHYSICAL_THRESHOLDS = {
     "preferred_peak_low_mpa": 300.0,

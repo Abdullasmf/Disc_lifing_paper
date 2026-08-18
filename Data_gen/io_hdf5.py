@@ -13,6 +13,9 @@ from .config import (
     BLADE_EQUIV_CG_RADIUS_MM,
     BLADE_EQUIV_MASS_KG,
     BLADE_EQUIV_NUM_BLADES,
+    FIXED_BASELINE_BLEND_RADIUS_MM,
+    FIXED_BASELINE_BORE_CORNER_BLEND_RADIUS_MM,
+    FIXED_BASELINE_REAR_ARM_NECK_RIM_BLEND_RADIUS_MM,
     CYCLE_PHASES,
     CYCLE_PHASE_WEIGHTS,
     CYCLE_SPEED_FACTORS,
@@ -100,6 +103,13 @@ def create_dataset_file(
     h5f.attrs["blade_equiv_num_blades"] = int(BLADE_EQUIV_NUM_BLADES)
     h5f.attrs["blade_equiv_mass_per_blade_kg"] = float(BLADE_EQUIV_MASS_KG)
     h5f.attrs["blade_equiv_cg_radius_mm"] = float(BLADE_EQUIV_CG_RADIUS_MM)
+    h5f.attrs["fixed_baseline_blend_radius_mm"] = float(FIXED_BASELINE_BLEND_RADIUS_MM)
+    h5f.attrs["fixed_baseline_bore_corner_blend_radius_mm"] = float(FIXED_BASELINE_BORE_CORNER_BLEND_RADIUS_MM)
+    h5f.attrs["fixed_baseline_rear_arm_neck_rim_blend_radius_mm"] = float(FIXED_BASELINE_REAR_ARM_NECK_RIM_BLEND_RADIUS_MM)
+    h5f.attrs["fixed_baseline_blend_provenance"] = (
+        "fixed manufacturing-style blends; constant across all samples; not LHS-sampled "
+        "(lower bore corners + lower rear-arm-neck/rim junction)"
+    )
 
     h5f.create_group("samples")
     return h5f

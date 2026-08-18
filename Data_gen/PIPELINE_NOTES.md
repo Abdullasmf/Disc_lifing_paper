@@ -2,6 +2,8 @@
 
 ## Pipeline Overview (v5.0 — C-groove + rear drive arm)
 
+Fixed baseline manufacturing-style blends of 0.8 mm are applied at the lower bore corners and lower rear-arm-neck/rim junction to eliminate otherwise idealized zero-radius corners; these blends are held constant and are not sampled contour deviations.
+
 ### Conceptual flow
 
 ```
