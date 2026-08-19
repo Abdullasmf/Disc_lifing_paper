@@ -2,7 +2,7 @@
 #SBATCH --job-name=GPU1(PN)
 #SBATCH --output=Disc_lifing_paper/GPU1.log
 #SBATCH --error=Disc_lifing_paper/GPU1.log
-#SBATCH --time=80:00:00
+#SBATCH --time=90:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
@@ -23,6 +23,8 @@ echo "starting script"
 
 echo "===============================Zonal-Edge-PointNetMLPJoint==============================="
 python -u Disc_lifing_paper/Zonal/Edge/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos12 --initial-batch 2
+echo "===============================Zonal-Edge-weighted-PointNetMLPJoint==============================="
+python -u Disc_lifing_paper/Zonal/Edge/PointNetMLPJoint/GPUL2_weighted.py --preset S_full_ln_pos12 --initial-batch 2
 echo "===============================Zonal-Edge-Arc-PointNetMLPJoint==============================="
 python -u Disc_lifing_paper/Zonal/Edge_arc/PointNetMLPJoint/GPUL2.py --preset S_full_ln_pos12 --initial-batch 2
 echo "===============================Zonal-Edge-Arc-_headfeat-PointNetMLPJoint==============================="
